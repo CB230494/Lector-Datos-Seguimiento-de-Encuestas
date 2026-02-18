@@ -95,7 +95,7 @@ def ubicar_distrito(canton: str, texto: str, catalog: dict) -> str | None:
     return None
 
 # -------------------------
-# Detección por bloque Survey123 (la buena)
+# Detección por bloque Survey123
 # -------------------------
 def infer_district_from_block(df: pd.DataFrame, distrito_col: str, valid_districts_norm: set) -> pd.Series:
     cols = list(df.columns)
@@ -138,82 +138,30 @@ def choose_district_col(cols):
     return None
 
 # -------------------------
-# CSS tarjetas
+# CSS (un solo cuadro)
 # -------------------------
 CSS = """
 <style>
 body { font-family: sans-serif; }
-.page-wrap { width: 720px; margin: 0 auto; }
-.title { text-align:center; font-size:42px; font-weight:800; margin: 8px 0 6px 0; }
-.subtitle { text-align:center; font-size:18px; font-weight:700; margin-top:0; margin-bottom:10px; color:#333; }
+.wrap { width: 920px; margin: 0 auto; }
+.h1 { text-align:center; font-size:40px; font-weight:900; margin: 10px 0 4px 0; }
+.h2 { text-align:center; font-size:18px; font-weight:800; margin: 0 0 14px 0; color:#333; }
+
 .card { border: 1px solid #cfcfcf; border-radius: 6px; overflow: hidden; background: #ffffff; }
-.tbl { width:100%; border-collapse: collapse; font-size: 14px; }
-.tbl th, .tbl td { border-bottom: 1px solid #d9d9d9; padding: 10px 10px; }
-.tbl thead th { background: #e6e6e6; text-align: left; font-weight: 800; }
-.section-row td { background: #d9d9d9; font-weight: 800; border-bottom: 0; padding: 10px; }
-.center { text-align:center; }
-.pct { background: #29a36a; color: #000; font-weight: 800; text-align: center; border-left: 3px solid #ffffff; border-right: 3px solid #ffffff; }
-.pending { background: #6d8fc9; color: #000; font-weight: 800; text-align: center; border-left: 3px solid #ffffff; }
-.meta, .count { text-align:center; font-weight: 700; }
-.footer { text-align:center; margin-top: 10px; font-size: 14px; }
+.tbl { width:100%; border-collapse: collapse; font-size: 13.5px; }
+.tbl th, .tbl td { border-bottom: 1px solid #d9d9d9; padding: 9px 10px; }
+.tbl thead th { background: #e6e6e6; text-align: left; font-weight: 900; }
+.section-row td { background: #d9d9d9; font-weight: 900; border-bottom: 0; padding: 9px 10px; }
+
+.meta, .count { text-align:center; font-weight: 800; }
+.pct { background: #29a36a; color: #000; font-weight: 900; text-align: center; border-left: 3px solid #ffffff; border-right: 3px solid #ffffff; }
+.pending { background: #6d8fc9; color: #000; font-weight: 900; text-align: center; border-left: 3px solid #ffffff; }
+
+.footer { text-align:center; margin-top: 12px; font-size: 13px; }
 .small { font-size: 13px; }
-.hr { height: 18px; }
+.reminder { margin-top: 16px; font-size: 12.5px; font-weight: 900; }
 </style>
 """
-
-def render_card(distrito: str, canton: str, rep_df: pd.DataFrame, fecha_txt: str, hora_manual: str):
-    rows_html = ""
-    for _, r in rep_df.iterrows():
-        rows_html += f"""
-        <tr class="section-row"><td colspan="6">{safe_html(r['Tipo'])}</td></tr>
-        <tr>
-          <td></td>
-          <td>{safe_html(r['Distrito'])}</td>
-          <td class="meta">{int(r['Meta'])}</td>
-          <td class="count">{int(r['Contabilizado'])}</td>
-          <td class="pct">{safe_html(fmt_pct(r['% Avance']))}</td>
-          <td class="pending">{int(r['Pendiente'])}</td>
-        </tr>
-        """
-
-    html_doc = f"""
-    <!doctype html>
-    <html>
-    <head>{CSS}</head>
-    <body>
-      <div class="page-wrap">
-        <div class="title">{safe_html(distrito)}</div>
-        <div class="subtitle">{safe_html(canton)}</div>
-
-        <div class="card">
-          <table class="tbl">
-            <thead>
-              <tr>
-                <th style="width:22%">Tipo</th>
-                <th style="width:20%">Distrito</th>
-                <th class="center" style="width:12%">Meta</th>
-                <th class="center" style="width:16%">Contabilizado</th>
-                <th class="center" style="width:15%">% Avance</th>
-                <th class="center" style="width:15%">Pendiente</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows_html}
-            </tbody>
-          </table>
-        </div>
-
-        <div class="footer">
-          <div class="small">{safe_html(fecha_txt)}</div>
-          <div class="small" style="margin-top:6px;"><b>Hora del corte:</b> {safe_html(hora_manual) if hora_manual else "—"}</div>
-        </div>
-
-        <div class="hr"></div>
-      </div>
-    </body>
-    </html>
-    """
-    components.html(html_doc, height=540, scrolling=False)
 
 # -------------------------
 # Sidebar
@@ -235,9 +183,7 @@ meta_policial  = st.sidebar.number_input("Meta Policial",  min_value=1, value=90
 
 st.sidebar.divider()
 hora_manual = st.sidebar.text_input("Hora del corte (manual)", value="")
-ver_no_identificados = st.sidebar.checkbox("Incluir NO_IDENTIFICADO en listados", value=False)
-
-modo_todos = st.sidebar.checkbox("✅ Ver TODOS los distritos (sin filtrar)", value=True)
+incluir_no_identificado = st.sidebar.checkbox("Incluir NO_IDENTIFICADO", value=False)
 
 # Fecha automática
 hoy = dt.date.today()
@@ -328,83 +274,97 @@ if not data:
 base = pd.concat(data, ignore_index=True)
 agg = base.groupby(["Tipo","Cantón","Distrito"]).size().reset_index(name="Contabilizado")
 
-# -------------------------
-# Cantón seleccionado (solo para agrupar tarjetas)
-# -------------------------
+# Cantón elegido (para hacer un solo cuadro por cantón)
 cantones = sorted(agg["Cantón"].unique().tolist())
-sel_canton = st.sidebar.selectbox("Cantón para mostrar", cantones, index=0)
+sel_canton = st.sidebar.selectbox("Cantón para el cuadro", cantones, index=0)
 
 resumen = agg[agg["Cantón"] == sel_canton].copy()
 
-# -------------------------
-# Desglose por distritos (tabla)
-# -------------------------
-st.subheader(f"📌 Desglose por distritos — {sel_canton}")
-
-resumen_pivot = resumen.pivot_table(
-    index=["Distrito"],
-    columns="Tipo",
-    values="Contabilizado",
-    aggfunc="sum",
-    fill_value=0
-).reset_index()
-
-for t in tipos_order:
-    if t not in resumen_pivot.columns:
-        resumen_pivot[t] = 0
-resumen_pivot["Total"] = resumen_pivot["Comunidad"] + resumen_pivot["Comercio"] + resumen_pivot["Policial"]
-
-if not ver_no_identificados:
-    resumen_pivot = resumen_pivot[resumen_pivot["Distrito"] != "NO_IDENTIFICADO"]
-
-st.dataframe(resumen_pivot.sort_values("Total", ascending=False), use_container_width=True, hide_index=True)
-
-st.divider()
-
-# -------------------------
-# ✅ MODO: TODOS LOS DISTRITOS (sin filtrar)
-# -------------------------
-distritos = sorted(resumen["Distrito"].unique().tolist())
-if not ver_no_identificados:
+# Lista de distritos (ordenados por total desc)
+totales = (resumen.groupby("Distrito")["Contabilizado"].sum()).to_dict()
+distritos = sorted(resumen["Distrito"].unique().tolist(), key=lambda d: totales.get(d, 0), reverse=True)
+if not incluir_no_identificado:
     distritos = [d for d in distritos if d != "NO_IDENTIFICADO"]
 
-if not distritos:
-    st.warning("No hay distritos para mostrar con los filtros actuales.")
-    st.stop()
-
-if modo_todos:
-    st.subheader("🧾 Tarjetas por distrito (todas)")
-    # Orden por total desc
-    totales = (resumen.groupby("Distrito")["Contabilizado"].sum()).to_dict()
-    distritos = sorted(distritos, key=lambda d: totales.get(d, 0), reverse=True)
-
-    for d in distritos:
-        sub = resumen[resumen["Distrito"] == d]
-        rows = []
-        for t in tipos_order:
-            cnt = int(sub.loc[sub["Tipo"] == t, "Contabilizado"].sum()) if (sub["Tipo"] == t).any() else 0
-            meta = meta_map[t]
-            pendiente = max(meta - cnt, 0)
-            avance = (cnt / meta * 100) if meta else 0
-            rows.append({"Tipo": t, "Distrito": d, "Meta": meta, "Contabilizado": cnt, "% Avance": avance, "Pendiente": pendiente})
-        rep = pd.DataFrame(rows)
-
-        render_card(d, sel_canton, rep, fecha_txt, hora_manual)
-
-else:
-    # modo filtro (1 distrito)
-    st.sidebar.divider()
-    sel_distrito = st.sidebar.selectbox("Distrito", sorted(distritos), index=0)
-    sub = resumen[resumen["Distrito"] == sel_distrito]
-    rows = []
+# Construir una fila por (Distrito, Tipo)
+rows = []
+for d in distritos:
     for t in tipos_order:
-        cnt = int(sub.loc[sub["Tipo"] == t, "Contabilizado"].sum()) if (sub["Tipo"] == t).any() else 0
+        cnt = int(resumen[(resumen["Distrito"] == d) & (resumen["Tipo"] == t)]["Contabilizado"].sum())
         meta = meta_map[t]
         pendiente = max(meta - cnt, 0)
         avance = (cnt / meta * 100) if meta else 0
-        rows.append({"Tipo": t, "Distrito": sel_distrito, "Meta": meta, "Contabilizado": cnt, "% Avance": avance, "Pendiente": pendiente})
-    rep = pd.DataFrame(rows)
-    render_card(sel_distrito, sel_canton, rep, fecha_txt, hora_manual)
+        rows.append({
+            "Distrito": d, "Tipo": t, "Meta": meta, "Contabilizado": cnt,
+            "% Avance": avance, "Pendiente": pendiente
+        })
+
+df_full = pd.DataFrame(rows)
+
+# -------------------------
+# Render: UN SOLO CUADRO (HTML)
+# -------------------------
+tbody = ""
+for d in distritos:
+    tbody += f'<tr class="section-row"><td colspan="6">{safe_html(d)}</td></tr>'
+    sub = df_full[df_full["Distrito"] == d]
+    for t in tipos_order:
+        r = sub[sub["Tipo"] == t].iloc[0]
+        tbody += f"""
+        <tr>
+          <td><b>{safe_html(t)}</b></td>
+          <td>{safe_html(d)}</td>
+          <td class="meta">{int(r['Meta'])}</td>
+          <td class="count">{int(r['Contabilizado'])}</td>
+          <td class="pct">{safe_html(fmt_pct(r['% Avance']))}</td>
+          <td class="pending">{int(r['Pendiente'])}</td>
+        </tr>
+        """
+
+html_doc = f"""
+<!doctype html>
+<html>
+<head>{CSS}</head>
+<body>
+  <div class="wrap">
+    <div class="h1">Seguimiento de encuestas</div>
+    <div class="h2">{safe_html(sel_canton)}</div>
+
+    <div class="card">
+      <table class="tbl">
+        <thead>
+          <tr>
+            <th style="width:18%">Tipo</th>
+            <th style="width:28%">Distrito</th>
+            <th style="width:12%; text-align:center;">Meta</th>
+            <th style="width:14%; text-align:center;">Contabilizado</th>
+            <th style="width:14%; text-align:center;">% Avance</th>
+            <th style="width:14%; text-align:center;">Pendiente</th>
+          </tr>
+        </thead>
+        <tbody>
+          {tbody}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="footer">
+      <div class="small">{safe_html(fecha_txt)}</div>
+      <div class="small" style="margin-top:6px;"><b>Hora del corte:</b> {safe_html(hora_manual) if hora_manual else "—"}</div>
+      <div class="reminder">
+        Recordatorio: Al alcanzar la meta de las encuestas, se debe realizar un oficio dirigido a la Comisionada Hannia Cubillo,
+        indicando que se ha alcanzado la meta. Dicho oficio se deberá subir a la carpeta compartida de Sembremos Seguridad,
+        propiamente a la denominada "Recolección".
+      </div>
+    </div>
+  </div>
+</body>
+</html>
+"""
+
+# altura dinámica (3 filas por distrito + 1 encabezado por distrito)
+height = min(300 + len(distritos) * 135, 2400)
+components.html(html_doc, height=height, scrolling=True)
 
 # -------------------------
 # Descarga
@@ -413,7 +373,7 @@ st.divider()
 st.subheader("⬇️ Descargar seguimiento completo")
 
 detalle = agg.copy()
-detalle["Meta"] = detalle["Tipo"].map(meta_map).fillna(0).astype(int)
+detalle["Meta"] = detalle["Tipo"].map({"Comunidad": meta_map["Comunidad"], "Comercio": meta_map["Comercio"], "Policial": meta_map["Policial"]}).astype(int)
 detalle["Pendiente"] = (detalle["Meta"] - detalle["Contabilizado"]).clip(lower=0)
 detalle["% Avance"] = (detalle["Contabilizado"] / detalle["Meta"] * 100).round(1)
 
