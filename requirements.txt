@@ -1,7 +1,2 @@
-pandas
-numpy
-openpyxl
-XlsxWriter
-matplotlib
-gspread
+
 
