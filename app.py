@@ -1,46 +1,119 @@
 # -*- coding: utf-8 -*-
 import io
 import datetime as dt
+import unicodedata
 import pandas as pd
 import streamlit as st
 
 st.set_page_config(page_title="Dashboard de Encuestas", layout="centered")
 
-# ----------------------------
-# Utilidades
-# ----------------------------
+# =========================
+# 1) Normalización texto
+# =========================
+def norm(s: str) -> str:
+    s = "" if s is None else str(s)
+    s = s.strip().lower()
+    s = "".join(c for c in unicodedata.normalize("NFD", s) if unicodedata.category(c) != "Mn")
+    s = " ".join(s.split())
+    return s
+
 def pick_col(cols, candidates):
-    """Devuelve el nombre real de la primera columna que coincide (ignorando tildes/mayúsculas)."""
-    import unicodedata
-
-    def norm(s):
-        s = str(s).strip().lower()
-        s = "".join(c for c in unicodedata.normalize("NFD", s) if unicodedata.category(c) != "Mn")
-        return s
-
-    mapping = {norm(c): c for c in cols}
+    cols_map = {norm(c): c for c in cols}
     for cand in candidates:
-        nc = norm(cand)
-        if nc in mapping:
-            return mapping[nc]
+        if norm(cand) in cols_map:
+            return cols_map[norm(cand)]
     return None
 
 
-def infer_district_name(df: pd.DataFrame, canton_col: str, distrito_col: str):
+# =========================
+# 2) Catálogo base (incluye PZ completo)
+#    + opción de subir catálogo para TODO CR
+# =========================
+BASE_CATALOGO = {
+    # Cantón: Pérez Zeledón (San José)
+    "perez zeledon": [
+        "San Isidro de El General",
+        "El General",
+        "Daniel Flores",
+        "Rivas",
+        "San Pedro",
+        "Platanares",
+        "Pejibaye",
+        "Cajón",
+        "Barú",
+        "Río Nuevo",
+        "Páramo",
+        "La Amistad",
+    ],
+    # Variantes comunes del nombre (por si viene con tilde/otros)
+    "pérez zeledón": [
+        "San Isidro de El General",
+        "El General",
+        "Daniel Flores",
+        "Rivas",
+        "San Pedro",
+        "Platanares",
+        "Pejibaye",
+        "Cajón",
+        "Barú",
+        "Río Nuevo",
+        "Páramo",
+        "La Amistad",
+    ],
+}
+
+def build_catalog_from_upload(file) -> dict:
     """
-    Survey123: a veces el nombre del distrito viene como columnas tipo 'Merced', 'Carmen', etc.
-    donde solo 1 queda llena. Buscamos la primera no vacía justo después de 'Distrito'.
+    Acepta catálogo en CSV/Excel con columnas:
+    - Canton (o Cantón)
+    - Distrito
+    Devuelve dict norm(canton) -> lista de distritos (texto original).
+    """
+    if file is None:
+        return {}
+
+    name = getattr(file, "name", "").lower()
+    if name.endswith(".csv"):
+        cat = pd.read_csv(file)
+    else:
+        cat = pd.read_excel(file, sheet_name=0)
+
+    cols = list(cat.columns)
+    col_canton = pick_col(cols, ["Canton", "Cantón", "CANTON", "CANTÓN"])
+    col_distrito = pick_col(cols, ["Distrito", "DISTRO", "District", "DISTRITO"])
+
+    if not col_canton or not col_distrito:
+        raise ValueError("El catálogo debe tener columnas Cantón/Canton y Distrito.")
+
+    cat = cat[[col_canton, col_distrito]].copy()
+    cat[col_canton] = cat[col_canton].astype(str).str.strip()
+    cat[col_distrito] = cat[col_distrito].astype(str).str.strip()
+    cat = cat.replace({"nan": None, "None": None, "": None}).dropna()
+
+    out = {}
+    for c, g in cat.groupby(col_canton):
+        out[norm(c)] = sorted(g[col_distrito].unique().tolist())
+    return out
+
+
+# =========================
+# 3) Detección distrito desde Survey123
+# =========================
+def infer_district_from_columns(df: pd.DataFrame, distrito_col: str) -> pd.Series:
+    """
+    Si Survey123 generó columnas por distrito (Merced, Cajón, etc.), normalmente van después de 'Distrito'.
+    Tomamos la primera no vacía en un rango cercano.
     """
     cols = list(df.columns)
+    if distrito_col not in cols:
+        return pd.Series([None] * len(df), index=df.index)
+
     start = cols.index(distrito_col) + 1
+    # corte típico
+    end_marker = pick_col(cols, ["Edad", "Genero", "Género", "Escolaridad", "Ocupacion", "Ocupación"])
+    end = cols.index(end_marker) if end_marker in cols else min(start + 35, len(cols))
 
-    end_marker = pick_col(cols, ["Edad", "Genero", "Género", "Escolaridad", "Tipo de local", "Tipo de local comercial"])
-    if end_marker and end_marker in cols:
-        end = cols.index(end_marker)
-    else:
-        end = min(start + 35, len(cols))
-
-    candidate_cols = [c for c in cols[start:end] if c not in (canton_col, distrito_col)]
+    candidate_cols = cols[start:end]
     if not candidate_cols:
         return pd.Series([None] * len(df), index=df.index)
 
@@ -54,16 +127,43 @@ def infer_district_name(df: pd.DataFrame, canton_col: str, distrito_col: str):
     return df.apply(first_non_empty, axis=1)
 
 
+def ubicar_distrito(canton: str, texto: str, catalog: dict) -> str | None:
+    """
+    Intenta mapear texto (puede ser barrio/sector) a un distrito válido del cantón.
+    - match exacto
+    - match por contención (si el texto contiene el nombre del distrito)
+    """
+    c = norm(canton)
+    t = norm(texto)
+
+    distritos = catalog.get(c, [])
+    if not distritos:
+        return None
+
+    # exacto
+    for d in distritos:
+        if norm(d) == t:
+            return d
+
+    # contiene (por ejemplo "distrito: cajon" o textos largos)
+    for d in distritos:
+        if norm(d) and norm(d) in t:
+            return d
+
+    return None
+
+
+# =========================
+# 4) Excel helpers
+# =========================
 def read_any_excel(uploaded_file) -> pd.DataFrame:
     return pd.read_excel(uploaded_file, sheet_name=0)
-
 
 def to_excel_bytes(df: pd.DataFrame, sheet_name="reporte"):
     out = io.BytesIO()
     with pd.ExcelWriter(out, engine="openpyxl") as writer:
         df.to_excel(writer, index=False, sheet_name=sheet_name)
     return out.getvalue()
-
 
 def fmt_pct(x):
     try:
@@ -72,12 +172,12 @@ def fmt_pct(x):
         return ""
 
 
-# ----------------------------
-# Estilos (HTML parecido al ejemplo)
-# ----------------------------
+# =========================
+# 5) Estilo HTML (como tu imagen)
+# =========================
 CSS = """
 <style>
-.page-wrap { width: 640px; margin: 0 auto; }
+.page-wrap { width: 680px; margin: 0 auto; }
 .title { text-align:center; font-size:42px; font-weight:800; margin: 8px 0 10px 0; }
 .card { border: 1px solid #cfcfcf; border-radius: 6px; overflow: hidden; background: #ffffff; }
 .tbl { width:100%; border-collapse: collapse; font-size: 14px; }
@@ -91,21 +191,24 @@ CSS = """
 .footer { text-align:center; margin-top: 14px; font-size: 14px; }
 .reminder { margin-top: 18px; font-size: 13px; font-weight: 800; }
 .small { font-size: 13px; }
+.badge { display:inline-block; padding: 3px 8px; border-radius: 10px; font-size: 12px; font-weight:700; background:#f2f2f2; border:1px solid #ddd; }
 </style>
 """
 
+# =========================
+# UI
+# =========================
 st.markdown('<div class="page-wrap">', unsafe_allow_html=True)
 st.markdown(CSS, unsafe_allow_html=True)
 
-# ----------------------------
-# Sidebar: carga
-# ----------------------------
-st.sidebar.header("📥 Carga de datos (por Excel separado)")
-st.sidebar.caption("Podés subir solo Comunidad para probar. Los que no subas quedan en 0.")
+st.sidebar.header("📥 Carga (por Excel separado)")
+f_com = st.sidebar.file_uploader("Excel Comunidad", type=["xlsx", "xls"], key="f_com")
+f_eco = st.sidebar.file_uploader("Excel Comercio", type=["xlsx", "xls"], key="f_eco")
+f_pol = st.sidebar.file_uploader("Excel Policial", type=["xlsx", "xls"], key="f_pol")
 
-f_com = st.sidebar.file_uploader("Excel Comunidad", type=["xlsx", "xls"])
-f_eco = st.sidebar.file_uploader("Excel Comercio", type=["xlsx", "xls"])
-f_pol = st.sidebar.file_uploader("Excel Policial", type=["xlsx", "xls"])
+st.sidebar.divider()
+st.sidebar.header("🗂️ Catálogo Cantón → Distritos (opcional)")
+cat_file = st.sidebar.file_uploader("Subir catálogo (CSV/XLSX)", type=["csv", "xlsx", "xls"], key="cat")
 
 st.sidebar.divider()
 st.sidebar.header("🎯 Metas")
@@ -116,111 +219,172 @@ meta_policial  = st.sidebar.number_input("Meta Policial",  min_value=1, value=90
 st.sidebar.divider()
 hora_manual = st.sidebar.text_input("Hora del corte (manual)", value="")
 
-# Fecha automática en español (sin depender de locale)
+# fecha automática en español
 hoy = dt.date.today()
-dias = {
-    "Monday":"lunes","Tuesday":"martes","Wednesday":"miércoles","Thursday":"jueves",
-    "Friday":"viernes","Saturday":"sábado","Sunday":"domingo"
-}
-meses = {
-    "January":"enero","February":"febrero","March":"marzo","April":"abril","May":"mayo","June":"junio",
-    "July":"julio","August":"agosto","September":"septiembre","October":"octubre","November":"noviembre","December":"diciembre"
-}
+dias = {"Monday":"lunes","Tuesday":"martes","Wednesday":"miércoles","Thursday":"jueves","Friday":"viernes","Saturday":"sábado","Sunday":"domingo"}
+meses = {"January":"enero","February":"febrero","March":"marzo","April":"abril","May":"mayo","June":"junio","July":"julio","August":"agosto",
+         "September":"septiembre","October":"octubre","November":"noviembre","December":"diciembre"}
 fecha_txt = hoy.strftime("%A, %d de %B de %Y")
 fecha_txt = fecha_txt.replace(hoy.strftime("%A"), dias.get(hoy.strftime("%A"), hoy.strftime("%A")))
 fecha_txt = fecha_txt.replace(hoy.strftime("%B"), meses.get(hoy.strftime("%B"), hoy.strftime("%B")))
 
-# ----------------------------
-# Preparación de cada archivo (si existe)
-# ----------------------------
-def prep(file, tipo_label):
+# construir catálogo final
+catalog = dict(BASE_CATALOGO)
+if cat_file is not None:
+    try:
+        uploaded_catalog = build_catalog_from_upload(cat_file)
+        # merge: el catálogo subido manda (override) por cantón
+        for k, v in uploaded_catalog.items():
+            catalog[k] = v
+        st.sidebar.success("Catálogo cargado ✅")
+    except Exception as e:
+        st.sidebar.error(f"Catálogo inválido: {e}")
+
+# =========================
+# Preparación por archivo
+# =========================
+def prep_file(file, tipo_label):
     df = read_any_excel(file)
     cols = list(df.columns)
 
     col_canton = pick_col(cols, ["Cantón", "Canton"])
+    if not col_canton:
+        raise ValueError(f"[{tipo_label}] No encontré columna Cantón/Canton.")
+
+    # Columna Distrito “base” (puede ser código o nombre)
     col_distrito = pick_col(cols, ["Distrito", "District"])
+    if not col_distrito:
+        # si no existe, igual intentamos por otras etiquetas frecuentes
+        col_distrito = pick_col(cols, ["Nombre Distrito", "Distrito (nombre)", "distrito_nombre"])
 
-    if not col_canton or not col_distrito:
-        raise ValueError(f"No pude detectar Cantón/Distrito en archivo: {tipo_label}")
-
-    df["_Canton_"] = df[col_canton].astype(str).str.strip()
-
-    guessed = infer_district_name(df, col_canton, col_distrito)
-    df["_Distrito_"] = guessed.where(guessed.notna(), df[col_distrito]).astype(str).str.strip()
+    if not col_distrito:
+        raise ValueError(f"[{tipo_label}] No encontré columna Distrito/District.")
 
     df["_Tipo_"] = tipo_label
+    df["_Canton_"] = df[col_canton].astype(str).str.strip()
 
+    # 1) intento directo con columna distrito
+    distrito_raw = df[col_distrito].astype(str).str.strip()
+
+    # 2) intento por columnas “por distrito” si aplica
+    inferred = infer_district_from_columns(df, col_distrito)
+
+    # prioridad: inferred (si existe) sino distrito_raw
+    df["_Distrito_Candidato_"] = inferred.where(inferred.notna(), distrito_raw)
+
+    # 3) ubicar contra catálogo (si hay catálogo para ese cantón)
+    def resolver(row):
+        canton = row["_Canton_"]
+        cand = row["_Distrito_Candidato_"]
+        if cand is None or str(cand).strip() == "" or str(cand).lower() in ("nan","none"):
+            return None
+
+        # si el cantón no está en catálogo, devolvemos el candidato (para no perder datos)
+        if norm(canton) not in catalog:
+            return str(cand).strip()
+
+        mapped = ubicar_distrito(canton, cand, catalog)
+        return mapped if mapped else "NO_IDENTIFICADO"
+
+    df["_Distrito_"] = df.apply(resolver, axis=1)
+
+    # limpieza
     df = df.replace({"nan": None, "None": None, "": None})
     df = df.dropna(subset=["_Canton_", "_Distrito_"])
 
     return df[["_Tipo_", "_Canton_", "_Distrito_"]].rename(
-        columns={"_Tipo_":"Tipo","_Canton_":"Cantón","_Distrito_":"Distrito"}
+        columns={"_Tipo_":"Tipo", "_Canton_":"Cantón", "_Distrito_":"Distrito"}
     )
 
 data = []
-errors = []
-
+errs = []
 if f_com:
-    try:
-        data.append(prep(f_com, "Comunidad"))
-    except Exception as e:
-        errors.append(str(e))
-
+    try: data.append(prep_file(f_com, "Comunidad"))
+    except Exception as e: errs.append(str(e))
 if f_eco:
-    try:
-        data.append(prep(f_eco, "Comercio"))
-    except Exception as e:
-        errors.append(str(e))
-
+    try: data.append(prep_file(f_eco, "Comercio"))
+    except Exception as e: errs.append(str(e))
 if f_pol:
-    try:
-        data.append(prep(f_pol, "Policial"))
-    except Exception as e:
-        errors.append(str(e))
+    try: data.append(prep_file(f_pol, "Policial"))
+    except Exception as e: errs.append(str(e))
 
-if errors:
-    st.error("Errores al leer archivos:\n\n- " + "\n- ".join(errors))
+if errs:
+    st.error("Errores leyendo archivos:\n\n- " + "\n- ".join(errs))
     st.stop()
 
 if not data:
-    st.info("Subí al menos 1 Excel (por ejemplo, Comunidad) para generar el dashboard.")
+    st.info("Subí al menos 1 Excel (Comunidad/Comercio/Policial).")
     st.stop()
 
 base = pd.concat(data, ignore_index=True)
 
-# ----------------------------
-# Agregación
-# ----------------------------
+# =========================
+# Agregación y métricas
+# =========================
 agg = (
     base.groupby(["Tipo","Cantón","Distrito"])
         .size()
         .reset_index(name="Contabilizado")
 )
 
-# Para que el dashboard funcione aunque falten tipos:
-meta_map = {
-    "Comunidad": int(meta_comunidad),
-    "Comercio": int(meta_comercio),
-    "Policial": int(meta_policial)
-}
+meta_map = {"Comunidad": int(meta_comunidad), "Comercio": int(meta_comercio), "Policial": int(meta_policial)}
+tipos_order = ["Comunidad","Comercio","Policial"]
 
-tipos_order = ["Comunidad", "Comercio", "Policial"]
-
-# ----------------------------
-# Selección Cantón/Distrito
-# ----------------------------
+# =========================
+# Selector cantón/distrito
+# =========================
 st.sidebar.divider()
-st.sidebar.header("📍 Selección del reporte")
-
+st.sidebar.header("📍 Selección")
 cantones = sorted(agg["Cantón"].unique().tolist())
 sel_canton = st.sidebar.selectbox("Cantón", cantones, index=0)
 
-distritos = sorted(agg.loc[agg["Cantón"] == sel_canton, "Distrito"].unique().tolist())
+# Ocultar NO_IDENTIFICADO del selector de distrito (pero queda en resumen/descarga si querés)
+distritos_all = agg.loc[agg["Cantón"] == sel_canton, "Distrito"].unique().tolist()
+distritos = sorted([d for d in distritos_all if d != "NO_IDENTIFICADO"])
+if not distritos:
+    distritos = sorted(distritos_all)
+
 sel_distrito = st.sidebar.selectbox("Distrito", distritos, index=0)
 
-# ----------------------------
-# Construir filas del reporte
-# ----------------------------
+# =========================
+# Resumen por cantón
+# =========================
+st.subheader(f"📌 Resumen por cantón: {sel_canton}")
+
+resumen = agg[agg["Cantón"] == sel_canton].copy()
+resumen["Meta"] = resumen["Tipo"].map(meta_map).astype(int)
+resumen["Pendiente"] = (resumen["Meta"] - resumen["Contabilizado"]).clip(lower=0)
+resumen["% Avance"] = (resumen["Contabilizado"] / resumen["Meta"] * 100).round(1)
+
+pivot = resumen.pivot_table(
+    index=["Cantón","Distrito"],
+    columns="Tipo",
+    values="Contabilizado",
+    aggfunc="sum",
+    fill_value=0
+).reset_index()
+
+for t in tipos_order:
+    if t not in pivot.columns:
+        pivot[t] = 0
+
+pivot["Total Contabilizado"] = pivot["Comunidad"] + pivot["Comercio"] + pivot["Policial"]
+pivot["Total Meta"] = meta_map["Comunidad"] + meta_map["Comercio"] + meta_map["Policial"]
+pivot["% Total"] = (pivot["Total Contabilizado"] / pivot["Total Meta"] * 100).round(1)
+pivot["Faltan Total"] = (pivot["Total Meta"] - pivot["Total Contabilizado"]).clip(lower=0)
+
+st.dataframe(pivot.sort_values(["Distrito"]), use_container_width=True, hide_index=True)
+
+st.markdown(
+    f'<span class="badge">Si aparece <b>NO_IDENTIFICADO</b>, es porque el texto (p.ej. barrio/sector) no calzó con un distrito válido del catálogo.</span>',
+    unsafe_allow_html=True
+)
+
+st.divider()
+
+# =========================
+# Dashboard estilo imagen
+# =========================
 sub = agg[(agg["Cantón"] == sel_canton) & (agg["Distrito"] == sel_distrito)].copy()
 
 rows = []
@@ -229,20 +393,9 @@ for t in tipos_order:
     meta = meta_map[t]
     pendiente = max(meta - cnt, 0)
     avance = (cnt / meta * 100) if meta else 0
-    rows.append({
-        "Tipo": t,
-        "Distrito": sel_distrito,
-        "Meta": meta,
-        "Contabilizado": cnt,
-        "% Avance": avance,
-        "Pendiente": pendiente
-    })
-
+    rows.append({"Tipo": t, "Distrito": sel_distrito, "Meta": meta, "Contabilizado": cnt, "% Avance": avance, "Pendiente": pendiente})
 rep = pd.DataFrame(rows)
 
-# ----------------------------
-# Render estilo “Merced”
-# ----------------------------
 st.markdown(f'<div class="title">{sel_distrito}</div>', unsafe_allow_html=True)
 
 header_html = """
@@ -260,10 +413,9 @@ header_html = """
     </thead>
     <tbody>
 """
-
-body_parts = []
+body = []
 for _, r in rep.iterrows():
-    body_parts.append(
+    body.append(
         f"""
         <tr class="section-row"><td colspan="6">{r['Tipo']}</td></tr>
         <tr>
@@ -276,14 +428,12 @@ for _, r in rep.iterrows():
         </tr>
         """
     )
-
 footer_html = """
     </tbody>
   </table>
 </div>
 """
-
-st.markdown(header_html + "\n".join(body_parts) + footer_html, unsafe_allow_html=True)
+st.markdown(header_html + "\n".join(body) + footer_html, unsafe_allow_html=True)
 
 st.markdown(
     f"""
@@ -300,9 +450,9 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-# ----------------------------
-# Descargar seguimiento completo
-# ----------------------------
+# =========================
+# Descargas
+# =========================
 st.divider()
 st.subheader("⬇️ Descargar seguimiento completo")
 
@@ -321,11 +471,6 @@ st.download_button(
 )
 
 st.markdown("</div>", unsafe_allow_html=True)
-
-
-
-
-
 
 
 
