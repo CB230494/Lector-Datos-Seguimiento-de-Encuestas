@@ -198,7 +198,12 @@ agg = (
 )
 
 # Para que el dashboard funcione aunque falten tipos:
-meta_map = {"Comunidad": int(meta_comunidad), "Comercio": int(meta_comercio), "Policial": int(meta_policial}
+meta_map = {
+    "Comunidad": int(meta_comunidad),
+    "Comercio": int(meta_comercio),
+    "Policial": int(meta_policial)
+}
+
 tipos_order = ["Comunidad", "Comercio", "Policial"]
 
 # ----------------------------
@@ -316,6 +321,7 @@ st.download_button(
 )
 
 st.markdown("</div>", unsafe_allow_html=True)
+
 
 
 
