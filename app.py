@@ -12,10 +12,12 @@ st.set_page_config(page_title="Dashboard de Encuestas", layout="centered")
 def pick_col(cols, candidates):
     """Devuelve el nombre real de la primera columna que coincide (ignorando tildes/mayúsculas)."""
     import unicodedata
+
     def norm(s):
         s = str(s).strip().lower()
         s = "".join(c for c in unicodedata.normalize("NFD", s) if unicodedata.category(c) != "Mn")
         return s
+
     mapping = {norm(c): c for c in cols}
     for cand in candidates:
         nc = norm(cand)
@@ -26,9 +28,8 @@ def pick_col(cols, candidates):
 
 def infer_district_name(df: pd.DataFrame, canton_col: str, distrito_col: str):
     """
-    Heurística Survey123: a veces el 'distrito nombre' no viene en la col Distrito,
-    sino en un bloque de columnas con nombres (Merced, Carmen, etc.) donde solo 1 queda lleno.
-    Buscamos la primera no vacía justo después de 'Distrito' y antes de 'Edad/Género/etc.'.
+    Survey123: a veces el nombre del distrito viene como columnas tipo 'Merced', 'Carmen', etc.
+    donde solo 1 queda llena. Buscamos la primera no vacía justo después de 'Distrito'.
     """
     cols = list(df.columns)
     start = cols.index(distrito_col) + 1
@@ -72,98 +73,42 @@ def fmt_pct(x):
 
 
 # ----------------------------
-# Estilos (HTML)
+# Estilos (HTML parecido al ejemplo)
 # ----------------------------
 CSS = """
 <style>
-.page-wrap {
-    width: 640px;
-    margin: 0 auto;
-}
-.title {
-    text-align:center;
-    font-size:42px;
-    font-weight:800;
-    margin: 8px 0 10px 0;
-}
-.card {
-    border: 1px solid #cfcfcf;
-    border-radius: 6px;
-    overflow: hidden;
-    background: #ffffff;
-}
-.tbl {
-    width:100%;
-    border-collapse: collapse;
-    font-size: 14px;
-}
-.tbl th, .tbl td {
-    border-bottom: 1px solid #d9d9d9;
-    padding: 10px 10px;
-}
-.tbl thead th {
-    background: #e6e6e6;
-    text-align: left;
-    font-weight: 800;
-}
-.section-row td {
-    background: #d9d9d9;
-    font-weight: 800;
-    border-bottom: 0;
-    padding: 10px;
-}
-.center {
-    text-align:center;
-}
-.pct {
-    background: #29a36a;
-    color: #000;
-    font-weight: 800;
-    text-align: center;
-    border-left: 3px solid #ffffff;
-    border-right: 3px solid #ffffff;
-}
-.pending {
-    background: #6d8fc9;
-    color: #000;
-    font-weight: 800;
-    text-align: center;
-    border-left: 3px solid #ffffff;
-}
-.meta, .count {
-    text-align:center;
-    font-weight: 700;
-}
-.footer {
-    text-align:center;
-    margin-top: 14px;
-    font-size: 14px;
-}
-.reminder {
-    margin-top: 18px;
-    font-size: 13px;
-    font-weight: 800;
-}
-.small {
-    font-size: 13px;
-}
+.page-wrap { width: 640px; margin: 0 auto; }
+.title { text-align:center; font-size:42px; font-weight:800; margin: 8px 0 10px 0; }
+.card { border: 1px solid #cfcfcf; border-radius: 6px; overflow: hidden; background: #ffffff; }
+.tbl { width:100%; border-collapse: collapse; font-size: 14px; }
+.tbl th, .tbl td { border-bottom: 1px solid #d9d9d9; padding: 10px 10px; }
+.tbl thead th { background: #e6e6e6; text-align: left; font-weight: 800; }
+.section-row td { background: #d9d9d9; font-weight: 800; border-bottom: 0; padding: 10px; }
+.center { text-align:center; }
+.pct { background: #29a36a; color: #000; font-weight: 800; text-align: center; border-left: 3px solid #ffffff; border-right: 3px solid #ffffff; }
+.pending { background: #6d8fc9; color: #000; font-weight: 800; text-align: center; border-left: 3px solid #ffffff; }
+.meta, .count { text-align:center; font-weight: 700; }
+.footer { text-align:center; margin-top: 14px; font-size: 14px; }
+.reminder { margin-top: 18px; font-size: 13px; font-weight: 800; }
+.small { font-size: 13px; }
 </style>
 """
 
-
-# ----------------------------
-# UI - carga y configuración
-# ----------------------------
 st.markdown('<div class="page-wrap">', unsafe_allow_html=True)
+st.markdown(CSS, unsafe_allow_html=True)
 
-st.sidebar.header("📥 Carga de datos")
+# ----------------------------
+# Sidebar: carga
+# ----------------------------
+st.sidebar.header("📥 Carga de datos (por Excel separado)")
+st.sidebar.caption("Podés subir solo Comunidad para probar. Los que no subas quedan en 0.")
 
-modo = st.sidebar.radio(
-    "¿Cómo vas a cargar los datos?",
-    ["Un solo Excel (incluye columna Tipo)", "Tres Excels (uno por Tipo)"],
-    index=0
-)
+f_com = st.sidebar.file_uploader("Excel Comunidad", type=["xlsx", "xls"])
+f_eco = st.sidebar.file_uploader("Excel Comercio", type=["xlsx", "xls"])
+f_pol = st.sidebar.file_uploader("Excel Policial", type=["xlsx", "xls"])
 
+st.sidebar.divider()
+st.sidebar.header("🎯 Metas")
 meta_comunidad = st.sidebar.number_input("Meta Comunidad", min_value=1, value=375, step=1)
 meta_comercio  = st.sidebar.number_input("Meta Comercio",  min_value=1, value=210, step=1)
 meta_policial  = st.sidebar.number_input("Meta Policial",  min_value=1, value=90,  step=1)
@@ -171,9 +116,8 @@ meta_policial  = st.sidebar.number_input("Meta Policial",  min_value=1, value=90
 st.sidebar.divider()
 hora_manual = st.sidebar.text_input("Hora del corte (manual)", value="")
 
+# Fecha automática en español (sin depender de locale)
 hoy = dt.date.today()
-fecha_txt = hoy.strftime("%A, %d de %B de %Y")
-# Español básico sin depender de locale del sistema:
 dias = {
     "Monday":"lunes","Tuesday":"martes","Wednesday":"miércoles","Thursday":"jueves",
     "Friday":"viernes","Saturday":"sábado","Sunday":"domingo"
@@ -182,88 +126,70 @@ meses = {
     "January":"enero","February":"febrero","March":"marzo","April":"abril","May":"mayo","June":"junio",
     "July":"julio","August":"agosto","September":"septiembre","October":"octubre","November":"noviembre","December":"diciembre"
 }
+fecha_txt = hoy.strftime("%A, %d de %B de %Y")
 fecha_txt = fecha_txt.replace(hoy.strftime("%A"), dias.get(hoy.strftime("%A"), hoy.strftime("%A")))
 fecha_txt = fecha_txt.replace(hoy.strftime("%B"), meses.get(hoy.strftime("%B"), hoy.strftime("%B")))
 
 # ----------------------------
-# Cargar data y normalizar a: Tipo, Cantón, Distrito
+# Preparación de cada archivo (si existe)
 # ----------------------------
-data = []
-
-if modo == "Un solo Excel (incluye columna Tipo)":
-    f = st.sidebar.file_uploader("Sube el Excel", type=["xlsx", "xls"])
-    if not f:
-        st.info("Sube el Excel para generar el dashboard.")
-        st.stop()
-
-    df = read_any_excel(f)
+def prep(file, tipo_label):
+    df = read_any_excel(file)
     cols = list(df.columns)
 
-    col_tipo = pick_col(cols, ["Tipo", "Encuesta", "Formulario"])
     col_canton = pick_col(cols, ["Cantón", "Canton"])
     col_distrito = pick_col(cols, ["Distrito", "District"])
 
     if not col_canton or not col_distrito:
-        st.error("No pude detectar Cantón/Distrito en tu Excel.")
-        st.stop()
-
-    # Tipo obligatorio en este modo
-    if not col_tipo:
-        st.error("En este modo necesito una columna 'Tipo' (Comunidad/Comercio/Policial).")
-        st.stop()
+        raise ValueError(f"No pude detectar Cantón/Distrito en archivo: {tipo_label}")
 
     df["_Canton_"] = df[col_canton].astype(str).str.strip()
+
     guessed = infer_district_name(df, col_canton, col_distrito)
     df["_Distrito_"] = guessed.where(guessed.notna(), df[col_distrito]).astype(str).str.strip()
-    df["_Tipo_"] = df[col_tipo].astype(str).str.strip()
+
+    df["_Tipo_"] = tipo_label
 
     df = df.replace({"nan": None, "None": None, "": None})
-    df = df.dropna(subset=["_Canton_", "_Distrito_", "_Tipo_"])
+    df = df.dropna(subset=["_Canton_", "_Distrito_"])
 
-    data.append(df[["_Tipo_", "_Canton_", "_Distrito_"]].rename(
+    return df[["_Tipo_", "_Canton_", "_Distrito_"]].rename(
         columns={"_Tipo_":"Tipo","_Canton_":"Cantón","_Distrito_":"Distrito"}
-    ))
+    )
 
-else:
-    f_com = st.sidebar.file_uploader("Excel Comunidad", type=["xlsx","xls"], key="com")
-    f_eco = st.sidebar.file_uploader("Excel Comercio", type=["xlsx","xls"], key="eco")
-    f_pol = st.sidebar.file_uploader("Excel Policial", type=["xlsx","xls"], key="pol")
+data = []
+errors = []
 
-    if not (f_com and f_eco and f_pol):
-        st.info("Sube los 3 archivos (Comunidad, Comercio y Policial).")
-        st.stop()
-
-    def prep(file, tipo_label):
-        df = read_any_excel(file)
-        cols = list(df.columns)
-        col_canton = pick_col(cols, ["Cantón", "Canton"])
-        col_distrito = pick_col(cols, ["Distrito", "District"])
-        if not col_canton or not col_distrito:
-            raise ValueError(f"No pude detectar Cantón/Distrito en archivo: {tipo_label}")
-
-        df["_Canton_"] = df[col_canton].astype(str).str.strip()
-        guessed = infer_district_name(df, col_canton, col_distrito)
-        df["_Distrito_"] = guessed.where(guessed.notna(), df[col_distrito]).astype(str).str.strip()
-        df["_Tipo_"] = tipo_label
-
-        df = df.replace({"nan": None, "None": None, "": None})
-        df = df.dropna(subset=["_Canton_", "_Distrito_"])
-        return df[["_Tipo_", "_Canton_", "_Distrito_"]].rename(
-            columns={"_Tipo_":"Tipo","_Canton_":"Cantón","_Distrito_":"Distrito"}
-        )
-
+if f_com:
     try:
         data.append(prep(f_com, "Comunidad"))
+    except Exception as e:
+        errors.append(str(e))
+
+if f_eco:
+    try:
         data.append(prep(f_eco, "Comercio"))
+    except Exception as e:
+        errors.append(str(e))
+
+if f_pol:
+    try:
         data.append(prep(f_pol, "Policial"))
-    except ValueError as e:
-        st.error(str(e))
-        st.stop()
+    except Exception as e:
+        errors.append(str(e))
+
+if errors:
+    st.error("Errores al leer archivos:\n\n- " + "\n- ".join(errors))
+    st.stop()
+
+if not data:
+    st.info("Subí al menos 1 Excel (por ejemplo, Comunidad) para generar el dashboard.")
+    st.stop()
 
 base = pd.concat(data, ignore_index=True)
 
 # ----------------------------
-# Agregación: conteos por Tipo/Cantón/Distrito
+# Agregación
 # ----------------------------
 agg = (
     base.groupby(["Tipo","Cantón","Distrito"])
@@ -271,42 +197,47 @@ agg = (
         .reset_index(name="Contabilizado")
 )
 
-# Selección Cantón/Distrito para el reporte tipo “Merced”
+# Para que el dashboard funcione aunque falten tipos:
+meta_map = {"Comunidad": int(meta_comunidad), "Comercio": int(meta_comercio), "Policial": int(meta_policial}
+tipos_order = ["Comunidad", "Comercio", "Policial"]
+
+# ----------------------------
+# Selección Cantón/Distrito
+# ----------------------------
 st.sidebar.divider()
-st.sidebar.header("🎯 Selección para el dashboard")
+st.sidebar.header("📍 Selección del reporte")
 
 cantones = sorted(agg["Cantón"].unique().tolist())
-sel_canton = st.sidebar.selectbox("Cantón", cantones, index=0 if cantones else None)
+sel_canton = st.sidebar.selectbox("Cantón", cantones, index=0)
 
 distritos = sorted(agg.loc[agg["Cantón"] == sel_canton, "Distrito"].unique().tolist())
-sel_distrito = st.sidebar.selectbox("Distrito", distritos, index=0 if distritos else None)
+sel_distrito = st.sidebar.selectbox("Distrito", distritos, index=0)
 
-if not sel_canton or not sel_distrito:
-    st.warning("No hay Cantón/Distrito disponibles con los datos cargados.")
-    st.stop()
-
-# Metas por tipo (como tu ejemplo)
-meta_map = {"Comunidad": int(meta_comunidad), "Comercio": int(meta_comercio), "Policial": int(meta_policial)}
-
-# Filtrar a 1 distrito para el dashboard estilo reporte
+# ----------------------------
+# Construir filas del reporte
+# ----------------------------
 sub = agg[(agg["Cantón"] == sel_canton) & (agg["Distrito"] == sel_distrito)].copy()
 
-# Asegurar que existan las 3 filas aunque alguna tenga 0
-tipos_order = ["Comunidad", "Comercio", "Policial"]
 rows = []
 for t in tipos_order:
     cnt = int(sub.loc[sub["Tipo"] == t, "Contabilizado"].sum()) if (sub["Tipo"] == t).any() else 0
     meta = meta_map[t]
     pendiente = max(meta - cnt, 0)
     avance = (cnt / meta * 100) if meta else 0
-    rows.append({"Tipo": t, "Distrito": sel_distrito, "Meta": meta, "Contabilizado": cnt, "% Avance": avance, "Pendiente": pendiente})
+    rows.append({
+        "Tipo": t,
+        "Distrito": sel_distrito,
+        "Meta": meta,
+        "Contabilizado": cnt,
+        "% Avance": avance,
+        "Pendiente": pendiente
+    })
 
 rep = pd.DataFrame(rows)
 
 # ----------------------------
-# Render (HTML similar al ejemplo)
+# Render estilo “Merced”
 # ----------------------------
-st.markdown(CSS, unsafe_allow_html=True)
 st.markdown(f'<div class="title">{sel_distrito}</div>', unsafe_allow_html=True)
 
 header_html = """
@@ -365,10 +296,10 @@ st.markdown(
 )
 
 # ----------------------------
-# Descarga de reporte detallado (opcional)
+# Descargar seguimiento completo
 # ----------------------------
 st.divider()
-st.subheader("⬇️ Descargar detalle (Cantón/Distrito/Tipo)")
+st.subheader("⬇️ Descargar seguimiento completo")
 
 detalle = agg.copy()
 detalle["Meta"] = detalle["Tipo"].map(meta_map).fillna(0).astype(int)
@@ -385,9 +316,6 @@ st.download_button(
 )
 
 st.markdown("</div>", unsafe_allow_html=True)
-
-
-
 
 
 
