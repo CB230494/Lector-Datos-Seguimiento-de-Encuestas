@@ -19,15 +19,15 @@ def norm(s: str) -> str:
     s = " ".join(s.split())
     return s
 
+def safe_html(x) -> str:
+    return html.escape("" if x is None else str(x))
+
 def pick_col(cols, candidates):
     cols_map = {norm(c): c for c in cols}
     for cand in candidates:
         if norm(cand) in cols_map:
             return cols_map[norm(cand)]
     return None
-
-def safe_html(x) -> str:
-    return html.escape("" if x is None else str(x))
 
 def read_any_excel(uploaded_file) -> pd.DataFrame:
     return pd.read_excel(uploaded_file, sheet_name=0)
@@ -85,17 +85,81 @@ def ubicar_distrito(canton: str, texto: str, catalog: dict) -> str | None:
     distritos = catalog.get(c, [])
     if not distritos:
         return None
+
+    # exacto
     for d in distritos:
         if norm(d) == t:
             return d
+
+    # contiene
     for d in distritos:
         nd = norm(d)
         if nd and nd in t:
             return d
+
     return None
 
 # =========================
-# CSS dashboard
+# Detección de distrito (CLAVE: vuelve el método bueno)
+# =========================
+def infer_district_from_block(df: pd.DataFrame, distrito_col: str, valid_districts_norm: set) -> pd.Series:
+    """
+    Survey123: a veces exporta una columna 'Distrito' (código) y luego muchas columnas con nombres de distritos
+    (Barú, Cajón, Daniel Flores...) donde solo una queda marcada/no vacía.
+    Esta función:
+      - Toma el rango de columnas después de 'Distrito'
+      - Si esas columnas se parecen a distritos del catálogo (overlap mínimo), entonces:
+          Devuelve el NOMBRE DE LA COLUMNA que está marcada en cada fila (ese es el distrito real)
+      - Si no se parecen, retorna None (no inventa).
+    """
+    cols = list(df.columns)
+    if distrito_col not in cols:
+        return pd.Series([None] * len(df), index=df.index)
+
+    start = cols.index(distrito_col) + 1
+    end_marker = pick_col(cols, ["Edad", "Genero", "Género", "Escolaridad", "Ocupacion", "Ocupación"])
+    end = cols.index(end_marker) if end_marker in cols else min(start + 45, len(cols))
+    block_cols = cols[start:end]
+    if not block_cols:
+        return pd.Series([None] * len(df), index=df.index)
+
+    # overlap con catálogo para confirmar que ese bloque SÍ son distritos
+    block_norm = {norm(c) for c in block_cols}
+    overlap = len(block_norm.intersection(valid_districts_norm))
+    # Si hay al menos 3 coincidencias, asumimos que sí es bloque de distritos
+    if overlap < 3:
+        return pd.Series([None] * len(df), index=df.index)
+
+    def first_marked_col(row):
+        for c in block_cols:
+            v = row.get(c, None)
+            if pd.notna(v) and str(v).strip() != "":
+                # En estos exports, el distrito real suele estar en el NOMBRE de la columna
+                return str(c).strip()
+        return None
+
+    return df.apply(first_marked_col, axis=1)
+
+def choose_district_col(cols):
+    """
+    Prioriza columnas que suelen traer el NOMBRE del distrito.
+    """
+    preferred = [
+        "distrito_label", "district_label", "nombre distrito", "distrito_nombre",
+        "distrito (label)", "distrito (texto)", "distrito", "district"
+    ]
+    for p in preferred:
+        found = pick_col(cols, [p])
+        if found:
+            return found
+    # fallback: cualquier cosa que contenga 'distrito'
+    for c in cols:
+        if "distrito" in norm(c) or "district" in norm(c):
+            return c
+    return None
+
+# =========================
+# CSS Dashboard (visible)
 # =========================
 CSS = """
 <style>
@@ -140,7 +204,7 @@ st.sidebar.divider()
 hora_manual = st.sidebar.text_input("Hora del corte (manual)", value="")
 ver_no_identificados = st.sidebar.checkbox("Mostrar NO_IDENTIFICADO en selector", value=False)
 
-# Fecha automática
+# Fecha automática en español
 hoy = dt.date.today()
 dias = {"Monday":"lunes","Tuesday":"martes","Wednesday":"miércoles","Thursday":"jueves","Friday":"viernes","Saturday":"sábado","Sunday":"domingo"}
 meses = {"January":"enero","February":"febrero","March":"marzo","April":"abril","May":"mayo","June":"junio","July":"julio","August":"agosto",
@@ -164,24 +228,36 @@ meta_map = {"Comunidad": int(meta_comunidad), "Comercio": int(meta_comercio), "P
 tipos_order = ["Comunidad", "Comercio", "Policial"]
 
 # =========================
-# Preparar archivos
+# Preparar archivo (con BLOQUE + fallback)
 # =========================
 def prep_file(file, tipo_label):
     df = read_any_excel(file)
     cols = list(df.columns)
 
     col_canton = pick_col(cols, ["Cantón", "Canton"])
-    col_distrito = pick_col(cols, ["Distrito", "District", "distrito_label", "district_label", "nombre distrito", "distrito_nombre"])
-
     if not col_canton:
         raise ValueError(f"[{tipo_label}] No encontré columna Cantón/Canton.")
+
+    col_distrito = choose_district_col(cols)
     if not col_distrito:
-        raise ValueError(f"[{tipo_label}] No encontré columna Distrito/District.")
+        raise ValueError(f"[{tipo_label}] No encontré columna de Distrito.")
 
     df["_Tipo_"] = tipo_label
     df["_Canton_"] = df[col_canton].astype(str).str.strip()
-    df["_DistritoCand_"] = df[col_distrito].astype(str).str.strip()
 
+    # Cantón más frecuente para decidir catálogo y detectar bloque
+    canton_mode = df["_Canton_"].mode().iloc[0] if len(df) else ""
+    valid_norm = {norm(x) for x in catalog.get(norm(canton_mode), [])}
+
+    # 1) Intento “bueno”: inferir por bloque (si aplica)
+    inferred_block = infer_district_from_block(df, col_distrito, valid_norm) if valid_norm else pd.Series([None]*len(df), index=df.index)
+
+    # 2) Fallback: usar la columna distrito directa
+    distrito_directo = df[col_distrito].astype(str).str.strip()
+
+    df["_DistritoCand_"] = inferred_block.where(inferred_block.notna(), distrito_directo)
+
+    # 3) Mapeo contra catálogo si existe
     def resolver(row):
         canton = row["_Canton_"]
         cand = row["_DistritoCand_"]
@@ -193,17 +269,17 @@ def prep_file(file, tipo_label):
 
         ckey = norm(canton)
         if ckey not in catalog:
-            return cand
+            return cand  # no hay catálogo, dejamos el texto
         mapped = ubicar_distrito(canton, cand, catalog)
         return mapped if mapped else "NO_IDENTIFICADO"
 
     df["_Distrito_"] = df.apply(resolver, axis=1)
-    df = df.replace({"nan": None, "None": None, "": None}).dropna(subset=["_Canton_", "_Distrito_"])
 
+    df = df.replace({"nan": None, "None": None, "": None}).dropna(subset=["_Canton_", "_Distrito_"])
     return df[["_Tipo_", "_Canton_", "_Distrito_"]].rename(columns={"_Tipo_":"Tipo", "_Canton_":"Cantón", "_Distrito_":"Distrito"})
 
-data = []
-errs = []
+# Leer los archivos cargados
+data, errs = [], []
 if f_com:
     try: data.append(prep_file(f_com, "Comunidad"))
     except Exception as e: errs.append(str(e))
@@ -217,7 +293,6 @@ if f_pol:
 if errs:
     st.error("Errores:\n\n- " + "\n- ".join(errs))
     st.stop()
-
 if not data:
     st.info("Subí al menos 1 Excel.")
     st.stop()
@@ -230,7 +305,6 @@ agg = base.groupby(["Tipo","Cantón","Distrito"]).size().reset_index(name="Conta
 # =========================
 st.sidebar.divider()
 st.sidebar.header("📍 Selección")
-
 cantones = sorted(agg["Cantón"].unique().tolist())
 sel_canton = st.sidebar.selectbox("Cantón", cantones, index=0)
 
@@ -241,7 +315,7 @@ distritos = sorted(d_all)
 sel_distrito = st.sidebar.selectbox("Distrito", distritos, index=0)
 
 # =========================
-# ✅ DESGLOSE PERFECTO POR DISTRITOS (restaurado)
+# Desglose por distritos (restaurado)
 # =========================
 st.subheader(f"📌 Desglose por distritos — {sel_canton}")
 
@@ -259,19 +333,16 @@ for t in tipos_order:
         resumen_pivot[t] = 0
 
 resumen_pivot["Total"] = resumen_pivot["Comunidad"] + resumen_pivot["Comercio"] + resumen_pivot["Policial"]
-
-# ordenar por total desc
 st.dataframe(resumen_pivot.sort_values("Total", ascending=False), use_container_width=True, hide_index=True)
 
-# alertas
 ni_total = int(resumen.loc[resumen["Distrito"] == "NO_IDENTIFICADO", "Contabilizado"].sum())
 if ni_total > 0:
-    st.warning(f"⚠️ Hay {ni_total} registros en NO_IDENTIFICADO. Activá el checkbox para verlo en selector si lo necesitás.")
+    st.warning(f"⚠️ Hay {ni_total} registros en NO_IDENTIFICADO (normalmente vienen como barrio/sector o columna incorrecta).")
 
 st.divider()
 
 # =========================
-# Dashboard 1 distrito (visible)
+# Dashboard (1 distrito) visible
 # =========================
 sub = agg[(agg["Cantón"] == sel_canton) & (agg["Distrito"] == sel_distrito)].copy()
 
