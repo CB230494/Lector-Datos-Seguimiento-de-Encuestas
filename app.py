@@ -10,7 +10,7 @@ import streamlit.components.v1 as components
 st.set_page_config(page_title="Dashboard de Encuestas", layout="centered")
 
 # =========================
-# Normalización / utilidades
+# Utilidades
 # =========================
 def norm(s: str) -> str:
     s = "" if s is None else str(s)
@@ -85,13 +85,9 @@ def ubicar_distrito(canton: str, texto: str, catalog: dict) -> str | None:
     distritos = catalog.get(c, [])
     if not distritos:
         return None
-
-    # exacto
     for d in distritos:
         if norm(d) == t:
             return d
-
-    # contiene
     for d in distritos:
         nd = norm(d)
         if nd and nd in t:
@@ -99,13 +95,14 @@ def ubicar_distrito(canton: str, texto: str, catalog: dict) -> str | None:
     return None
 
 # =========================
-# CSS estilo imagen
+# CSS dashboard
 # =========================
 CSS = """
 <style>
 body { font-family: sans-serif; }
-.page-wrap { width: 680px; margin: 0 auto; }
+.page-wrap { width: 720px; margin: 0 auto; }
 .title { text-align:center; font-size:42px; font-weight:800; margin: 8px 0 10px 0; }
+.subtitle { text-align:center; font-size:18px; font-weight:700; margin-top:-4px; margin-bottom:12px; color:#333; }
 .card { border: 1px solid #cfcfcf; border-radius: 6px; overflow: hidden; background: #ffffff; }
 .tbl { width:100%; border-collapse: collapse; font-size: 14px; }
 .tbl th, .tbl td { border-bottom: 1px solid #d9d9d9; padding: 10px 10px; }
@@ -122,7 +119,7 @@ body { font-family: sans-serif; }
 """
 
 # =========================
-# UI
+# Sidebar
 # =========================
 st.sidebar.header("📥 Carga (Excels separados)")
 f_com = st.sidebar.file_uploader("Excel Comunidad", type=["xlsx", "xls"], key="f_com")
@@ -141,6 +138,7 @@ meta_policial  = st.sidebar.number_input("Meta Policial",  min_value=1, value=90
 
 st.sidebar.divider()
 hora_manual = st.sidebar.text_input("Hora del corte (manual)", value="")
+ver_no_identificados = st.sidebar.checkbox("Mostrar NO_IDENTIFICADO en selector", value=False)
 
 # Fecha automática
 hoy = dt.date.today()
@@ -195,13 +193,13 @@ def prep_file(file, tipo_label):
 
         ckey = norm(canton)
         if ckey not in catalog:
-            return cand  # sin catálogo, no inventamos
+            return cand
         mapped = ubicar_distrito(canton, cand, catalog)
         return mapped if mapped else "NO_IDENTIFICADO"
 
     df["_Distrito_"] = df.apply(resolver, axis=1)
-
     df = df.replace({"nan": None, "None": None, "": None}).dropna(subset=["_Canton_", "_Distrito_"])
+
     return df[["_Tipo_", "_Canton_", "_Distrito_"]].rename(columns={"_Tipo_":"Tipo", "_Canton_":"Cantón", "_Distrito_":"Distrito"})
 
 data = []
@@ -228,21 +226,52 @@ base = pd.concat(data, ignore_index=True)
 agg = base.groupby(["Tipo","Cantón","Distrito"]).size().reset_index(name="Contabilizado")
 
 # =========================
-# Selección cantón/distrito
+# Selector cantón/distrito
 # =========================
 st.sidebar.divider()
 st.sidebar.header("📍 Selección")
+
 cantones = sorted(agg["Cantón"].unique().tolist())
 sel_canton = st.sidebar.selectbox("Cantón", cantones, index=0)
 
-distritos_all = agg.loc[agg["Cantón"] == sel_canton, "Distrito"].unique().tolist()
-distritos = sorted([d for d in distritos_all if d != "NO_IDENTIFICADO"])
-if not distritos:
-    distritos = sorted(distritos_all)
+d_all = agg.loc[agg["Cantón"] == sel_canton, "Distrito"].unique().tolist()
+if not ver_no_identificados:
+    d_all = [d for d in d_all if d != "NO_IDENTIFICADO"]
+distritos = sorted(d_all)
 sel_distrito = st.sidebar.selectbox("Distrito", distritos, index=0)
 
 # =========================
-# Armar reporte del distrito seleccionado
+# ✅ DESGLOSE PERFECTO POR DISTRITOS (restaurado)
+# =========================
+st.subheader(f"📌 Desglose por distritos — {sel_canton}")
+
+resumen = agg[agg["Cantón"] == sel_canton].copy()
+resumen_pivot = resumen.pivot_table(
+    index=["Distrito"],
+    columns="Tipo",
+    values="Contabilizado",
+    aggfunc="sum",
+    fill_value=0
+).reset_index()
+
+for t in tipos_order:
+    if t not in resumen_pivot.columns:
+        resumen_pivot[t] = 0
+
+resumen_pivot["Total"] = resumen_pivot["Comunidad"] + resumen_pivot["Comercio"] + resumen_pivot["Policial"]
+
+# ordenar por total desc
+st.dataframe(resumen_pivot.sort_values("Total", ascending=False), use_container_width=True, hide_index=True)
+
+# alertas
+ni_total = int(resumen.loc[resumen["Distrito"] == "NO_IDENTIFICADO", "Contabilizado"].sum())
+if ni_total > 0:
+    st.warning(f"⚠️ Hay {ni_total} registros en NO_IDENTIFICADO. Activá el checkbox para verlo en selector si lo necesitás.")
+
+st.divider()
+
+# =========================
+# Dashboard 1 distrito (visible)
 # =========================
 sub = agg[(agg["Cantón"] == sel_canton) & (agg["Distrito"] == sel_distrito)].copy()
 
@@ -254,11 +283,6 @@ for t in tipos_order:
     avance = (cnt / meta * 100) if meta else 0
     rows.append({"Tipo": t, "Distrito": sel_distrito, "Meta": meta, "Contabilizado": cnt, "% Avance": avance, "Pendiente": pendiente})
 rep = pd.DataFrame(rows)
-
-# =========================
-# Render VISIBLE (NO TEXTO) con components.html()
-# =========================
-title = safe_html(sel_distrito)
 
 rows_html = ""
 for _, r in rep.iterrows():
@@ -280,7 +304,8 @@ dashboard_html = f"""
 <head>{CSS}</head>
 <body>
   <div class="page-wrap">
-    <div class="title">{title}</div>
+    <div class="title">{safe_html(sel_distrito)}</div>
+    <div class="subtitle">{safe_html(sel_canton)}</div>
 
     <div class="card">
       <table class="tbl">
@@ -313,12 +338,10 @@ dashboard_html = f"""
 </body>
 </html>
 """
-
-# altura suficiente para que se vea completo
-components.html(dashboard_html, height=720, scrolling=False)
+components.html(dashboard_html, height=760, scrolling=False)
 
 # =========================
-# Descargar seguimiento completo
+# Descarga
 # =========================
 st.divider()
 st.subheader("⬇️ Descargar seguimiento completo")
