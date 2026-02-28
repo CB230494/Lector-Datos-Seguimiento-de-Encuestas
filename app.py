@@ -55,7 +55,42 @@ def fecha_es(dtobj: dt.date) -> str:
     return f
 
 # =========================
-# Catálogo base (Pérez Zeledón)
+# Catálogo oficial Cantón → Distritos (SNIT / DTA)
+# =========================
+DTA_SNT_URL = "https://files.snitcr.go.cr/boletines/DTA-TABLA%20POR%20PROVINCIA-CANT%C3%93N-DISTRITO%202022V3.xlsx"
+
+@st.cache_data(show_spinner=False)
+def load_catalog_from_dta_url(url: str) -> dict:
+    """
+    Intenta cargar el catálogo oficial (Cantón->Distritos) desde el Excel DTA (SNIT).
+    Devuelve dict con llave norm(cantón) y lista de distritos (texto original).
+    """
+    df = pd.read_excel(url, sheet_name=0)
+    cols = list(df.columns)
+    col_canton = pick_col(cols, ["CANTON", "CANTÓN", "Cantón", "Canton"])
+    col_distrito = pick_col(cols, ["DISTRITO", "Distrito", "District"])
+    if not col_canton or not col_distrito:
+        # si cambia el formato, intentamos búsqueda por contiene
+        for c in cols:
+            if "canton" in norm(c) or "cantón" in norm(c):
+                col_canton = c
+            if "distrito" in norm(c) or "district" in norm(c):
+                col_distrito = c
+    if not col_canton or not col_distrito:
+        raise ValueError("No se detectaron columnas Cantón/Distrito en el DTA.")
+
+    df = df[[col_canton, col_distrito]].copy()
+    df[col_canton] = df[col_canton].astype(str).str.strip()
+    df[col_distrito] = df[col_distrito].astype(str).str.strip()
+    df = df.replace({"nan": None, "None": None, "": None}).dropna()
+
+    out = {}
+    for c, g in df.groupby(col_canton):
+        out[norm(c)] = sorted(g[col_distrito].unique().tolist(), key=lambda x: norm(x))
+    return out
+
+# =========================
+# Catálogo base (fallback mínimo)
 # =========================
 BASE_CATALOGO = {
     "perez zeledon": [
@@ -86,7 +121,7 @@ def build_catalog_from_upload(file) -> dict:
 
     out = {}
     for c, g in cat.groupby(col_canton):
-        out[norm(c)] = sorted(g[col_distrito].unique().tolist())
+        out[norm(c)] = sorted(g[col_distrito].unique().tolist(), key=lambda x: norm(x))
     return out
 
 def ubicar_distrito(canton: str, texto: str, catalog: dict) -> str | None:
@@ -142,7 +177,7 @@ def infer_district_from_block(df: pd.DataFrame, distrito_col: str, valid_distric
 def choose_district_col(cols):
     preferred = [
         "distrito_label", "district_label", "nombre distrito", "distrito_nombre",
-        "distrito (label)", "distrito (texto)", "distrito", "district"
+        "distrito (label)", "distrito (texto)", "distrito", "district", "2. Distrito:", "2. Distrito"
     ]
     for p in preferred:
         found = pick_col(cols, [p])
@@ -152,6 +187,67 @@ def choose_district_col(cols):
         if "distrito" in norm(c) or "district" in norm(c):
             return c
     return None
+
+def choose_canton_col(cols):
+    preferred = ["cantón", "canton", "1. Cantón:", "1. Canton:", "1. Cantón", "1. Canton"]
+    for p in preferred:
+        found = pick_col(cols, [p])
+        if found:
+            return found
+    for c in cols:
+        if "canton" in norm(c) or "cantón" in norm(c):
+            return c
+    return None
+
+def infer_canton_from_survey_title(cols) -> str | None:
+    """
+    Si no hay columna Cantón, intenta inferirlo desde columnas tipo:
+    'Encuesta comunidad – Alajuela Sur' / 'Encuesta policial – Alajuela Norte'
+    """
+    for c in cols:
+        nc = str(c)
+        if "encuesta" in norm(nc) and ("–" in nc or "-" in nc):
+            # parte después del guion largo (–) o normal (-)
+            if "–" in nc:
+                parts = nc.split("–", 1)
+            else:
+                parts = nc.split("-", 1)
+            if len(parts) == 2:
+                return parts[1].strip()
+    return None
+
+# =========================
+# Consentimiento Sí/No
+# =========================
+def choose_consent_col(cols):
+    # En tus 3 excels viene exactamente así:
+    # "¿Acepta participar en esta encuesta?"
+    preferred = [
+        "¿Acepta participar en esta encuesta?",
+        "Acepta participar en esta encuesta",
+        "Consentimiento",
+        "Consentimiento informado",
+        "¿Acepta participar?",
+        "Acepta participar"
+    ]
+    found = pick_col(cols, preferred)
+    if found:
+        return found
+
+    # fallback: buscar cualquier columna que contenga "acepta" y "particip"
+    for c in cols:
+        nc = norm(c)
+        if "acepta" in nc and "particip" in nc:
+            return c
+    return None
+
+def is_yes(v) -> bool:
+    nv = norm(v)
+    return nv in ("si", "sí", "s i", "s\u00ed")
+
+def is_no(v) -> bool:
+    nv = norm(v)
+    return nv == "no"
 
 # =========================
 # CSS (un solo cuadro)
@@ -174,6 +270,7 @@ body { font-family: sans-serif; }
 .pending { background: #6d8fc9; color: #000; font-weight: 900; text-align: center; border-left: 3px solid #ffffff; }
 
 .footer { text-align:center; margin-top: 10px; font-size: 13px; }
+.smallbox { border:1px solid #d9d9d9; border-radius:6px; padding:10px; background:#fafafa; }
 </style>
 """
 
@@ -259,7 +356,6 @@ def build_table_image_png(sel_canton: str, distritos: list, df_full: pd.DataFram
                 if c == 0:
                     cell.set_text_props(weight="bold")
 
-    # Footer de fecha/hora en la imagen (sin recordatorio)
     footer = f"{fecha_txt}  |  Hora del corte: {hora_manual if hora_manual else '—'}"
     fig.text(0.5, 0.01, footer, ha="center", va="bottom", fontsize=10)
 
@@ -277,8 +373,10 @@ f_eco = st.sidebar.file_uploader("Excel Comercio", type=["xlsx", "xls"], key="f_
 f_pol = st.sidebar.file_uploader("Excel Policial", type=["xlsx", "xls"], key="f_pol")
 
 st.sidebar.divider()
-st.sidebar.header("🗂️ Catálogo Cantón → Distritos (opcional)")
-cat_file = st.sidebar.file_uploader("Subir catálogo (CSV/XLSX)", type=["csv", "xlsx", "xls"], key="cat")
+st.sidebar.header("🗂️ Catálogo Cantón → Distritos")
+use_official = st.sidebar.checkbox("Usar catálogo oficial (DTA SNIT) por defecto", value=True)
+
+cat_file = st.sidebar.file_uploader("O subir catálogo manual (CSV/XLSX)", type=["csv", "xlsx", "xls"], key="cat")
 
 st.sidebar.divider()
 st.sidebar.header("🎯 Metas")
@@ -293,84 +391,163 @@ incluir_no_identificado = st.sidebar.checkbox("Incluir NO_IDENTIFICADO", value=F
 meta_map = {"Comunidad": int(meta_comunidad), "Comercio": int(meta_comercio), "Policial": int(meta_policial)}
 tipos_order = ["Comunidad", "Comercio", "Policial"]
 
-# Fecha automática (es)
 fecha_txt = fecha_es(dt.date.today())
 
-# Catálogo final
+# =========================
+# Construir catálogo final
+# =========================
 catalog = dict(BASE_CATALOGO)
+
+if use_official:
+    try:
+        official = load_catalog_from_dta_url(DTA_SNT_URL)
+        catalog.update(official)
+        st.sidebar.success("Catálogo oficial DTA cargado ✅")
+    except Exception as e:
+        st.sidebar.warning(f"No se pudo cargar DTA oficial (se usa fallback). Detalle: {e}")
+
 if cat_file is not None:
     try:
         uploaded_catalog = build_catalog_from_upload(cat_file)
-        for k, v in uploaded_catalog.items():
-            catalog[k] = v
-        st.sidebar.success("Catálogo cargado ✅")
+        catalog.update(uploaded_catalog)
+        st.sidebar.success("Catálogo manual cargado ✅")
     except Exception as e:
         st.sidebar.error(f"Catálogo inválido: {e}")
 
 # =========================
-# Preparar archivo (BLOQUE + fallback)
+# Preparar archivo (Consentimiento + BLOQUE + fallback)
 # =========================
 def prep_file(file, tipo_label):
     df = read_any_excel(file)
     cols = list(df.columns)
 
-    col_canton = pick_col(cols, ["Cantón", "Canton"])
-    if not col_canton:
-        raise ValueError(f"[{tipo_label}] No encontré columna Cantón/Canton.")
+    # ---- Consentimiento (Sí/No) ----
+    col_consent = choose_consent_col(cols)
+    if not col_consent:
+        raise ValueError(f"[{tipo_label}] No encontré la columna de consentimiento (¿Acepta participar...?).")
 
-    col_distrito = choose_district_col(cols)
-    if not col_distrito:
-        raise ValueError(f"[{tipo_label}] No encontré columna de Distrito.")
+    # Conteo Sí/No
+    consent_series = df[col_consent].astype(str).map(lambda x: norm(x))
+    n_si = int((consent_series == "si").sum())
+    n_no = int((consent_series == "no").sum())
+    n_total = int(len(df))
+
+    # Filtrar SOLO los "SI" para contabilizar avance
+    df = df[consent_series == "si"].copy()
+
+    # ---- Cantón ----
+    col_canton = choose_canton_col(cols)
+    if col_canton:
+        df["_Canton_"] = df[col_canton].astype(str).str.strip()
+    else:
+        # fallback por título de encuesta si no viene pregunta Cantón (pasa en Policial)
+        inferred = infer_canton_from_survey_title(cols)
+        if not inferred:
+            raise ValueError(f"[{tipo_label}] No encontré columna Cantón ni pude inferir cantón desde el título de la encuesta.")
+        df["_Canton_"] = inferred
+
+    # ---- Distrito ----
+    if tipo_label == "Policial":
+        # en policial NO hay distritos: lo dejamos fijo
+        df["_Distrito_"] = "SIN_DISTRITO"
+    else:
+        col_distrito = choose_district_col(cols)
+        if not col_distrito:
+            raise ValueError(f"[{tipo_label}] No encontré columna de Distrito.")
+
+        canton_mode = df["_Canton_"].mode().iloc[0] if len(df) else ""
+        valid_norm = {norm(x) for x in catalog.get(norm(canton_mode), [])}
+
+        inferred_block = infer_district_from_block(df, col_distrito, valid_norm) if valid_norm else pd.Series([None]*len(df), index=df.index)
+        distrito_directo = df[col_distrito].astype(str).str.strip()
+        df["_DistritoCand_"] = inferred_block.where(inferred_block.notna(), distrito_directo)
+
+        def resolver(row):
+            canton = row["_Canton_"]
+            cand = row["_DistritoCand_"]
+            if cand is None:
+                return None
+            cand = str(cand).strip()
+            if cand == "" or cand.lower() in ("nan", "none"):
+                return None
+
+            ckey = norm(canton)
+            if ckey not in catalog:
+                return cand  # sin catálogo, dejamos el texto tal cual
+            mapped = ubicar_distrito(canton, cand, catalog)
+            return mapped if mapped else "NO_IDENTIFICADO"
+
+        df["_Distrito_"] = df.apply(resolver, axis=1)
 
     df["_Tipo_"] = tipo_label
-    df["_Canton_"] = df[col_canton].astype(str).str.strip()
-
-    canton_mode = df["_Canton_"].mode().iloc[0] if len(df) else ""
-    valid_norm = {norm(x) for x in catalog.get(norm(canton_mode), [])}
-
-    inferred_block = infer_district_from_block(df, col_distrito, valid_norm) if valid_norm else pd.Series([None]*len(df), index=df.index)
-    distrito_directo = df[col_distrito].astype(str).str.strip()
-    df["_DistritoCand_"] = inferred_block.where(inferred_block.notna(), distrito_directo)
-
-    def resolver(row):
-        canton = row["_Canton_"]
-        cand = row["_DistritoCand_"]
-        if cand is None:
-            return None
-        cand = str(cand).strip()
-        if cand == "" or cand.lower() in ("nan", "none"):
-            return None
-
-        ckey = norm(canton)
-        if ckey not in catalog:
-            return cand  # sin catálogo, dejamos el texto
-        mapped = ubicar_distrito(canton, cand, catalog)
-        return mapped if mapped else "NO_IDENTIFICADO"
-
-    df["_Distrito_"] = df.apply(resolver, axis=1)
     df = df.replace({"nan": None, "None": None, "": None}).dropna(subset=["_Canton_", "_Distrito_"])
 
-    return df[["_Tipo_", "_Canton_", "_Distrito_"]].rename(columns={"_Tipo_":"Tipo", "_Canton_":"Cantón", "_Distrito_":"Distrito"})
+    out_df = df[["_Tipo_", "_Canton_", "_Distrito_"]].rename(
+        columns={"_Tipo_":"Tipo", "_Canton_":"Cantón", "_Distrito_":"Distrito"}
+    )
 
+    stats = {
+        "Tipo": tipo_label,
+        "Total filas (Excel)": n_total,
+        "Consentimiento SI": n_si,
+        "Consentimiento NO": n_no,
+        "Usadas (solo SI)": int(len(out_df)),
+        "Col consentimiento": col_consent,
+        "Cantón (col/fallback)": col_canton if col_canton else "INFERIDO (título encuesta)"
+    }
+    return out_df, stats
+
+# =========================
 # Leer archivos
-data, errs = [], []
+# =========================
+data, errs, stats_all = [], [], []
+
 if f_com:
-    try: data.append(prep_file(f_com, "Comunidad"))
-    except Exception as e: errs.append(str(e))
+    try:
+        df_ok, stt = prep_file(f_com, "Comunidad")
+        data.append(df_ok); stats_all.append(stt)
+    except Exception as e:
+        errs.append(str(e))
+
 if f_eco:
-    try: data.append(prep_file(f_eco, "Comercio"))
-    except Exception as e: errs.append(str(e))
+    try:
+        df_ok, stt = prep_file(f_eco, "Comercio")
+        data.append(df_ok); stats_all.append(stt)
+    except Exception as e:
+        errs.append(str(e))
+
 if f_pol:
-    try: data.append(prep_file(f_pol, "Policial"))
-    except Exception as e: errs.append(str(e))
+    try:
+        df_ok, stt = prep_file(f_pol, "Policial")
+        data.append(df_ok); stats_all.append(stt)
+    except Exception as e:
+        errs.append(str(e))
 
 if errs:
     st.error("Errores:\n\n- " + "\n- ".join(errs))
     st.stop()
+
 if not data:
     st.info("Subí al menos 1 Excel.")
     st.stop()
 
+# =========================
+# Mostrar resumen Sí/No (y recordar que NO se descartan)
+# =========================
+st.sidebar.divider()
+st.sidebar.subheader("✅ Consentimiento (Sí/No)")
+stats_df = pd.DataFrame(stats_all)
+if len(stats_df):
+    st.sidebar.dataframe(
+        stats_df[["Tipo","Consentimiento SI","Consentimiento NO","Usadas (solo SI)"]],
+        use_container_width=True,
+        hide_index=True
+    )
+    st.sidebar.caption("Los 'NO' se muestran aquí, pero NO se contabilizan en el avance.")
+
+# =========================
+# Agregación principal (YA filtrada por SI)
+# =========================
 base = pd.concat(data, ignore_index=True)
 agg = base.groupby(["Tipo","Cantón","Distrito"]).size().reset_index(name="Contabilizado")
 
@@ -383,10 +560,11 @@ resumen = agg[agg["Cantón"] == sel_canton].copy()
 # distritos ordenados por total desc
 totales = (resumen.groupby("Distrito")["Contabilizado"].sum()).to_dict()
 distritos = sorted(resumen["Distrito"].unique().tolist(), key=lambda d: totales.get(d, 0), reverse=True)
+
 if not incluir_no_identificado:
     distritos = [d for d in distritos if d != "NO_IDENTIFICADO"]
 
-# construir df_full (1 fila por distrito-tipo)
+# Construir df_full (1 fila por distrito-tipo)
 rows = []
 for d in distritos:
     for t in tipos_order:
@@ -398,7 +576,7 @@ for d in distritos:
 df_full = pd.DataFrame(rows)
 
 # =========================
-# Render HTML (UN SOLO CUADRO + fecha/hora, sin recordatorio)
+# Render HTML (UN SOLO CUADRO + fecha/hora)
 # =========================
 tbody = ""
 for d in distritos:
@@ -478,7 +656,15 @@ with col2:
     detalle["Pendiente"] = (detalle["Meta"] - detalle["Contabilizado"]).clip(lower=0)
     detalle["% Avance"] = (detalle["Contabilizado"] / detalle["Meta"] * 100).round(1)
 
-    excel_bytes = to_excel_bytes(detalle.sort_values(["Cantón","Distrito","Tipo"]), sheet_name="seguimiento")
+    # Agregar hoja/resumen de consentimiento por tipo
+    resumen_consent = pd.DataFrame(stats_all)
+
+    out = io.BytesIO()
+    with pd.ExcelWriter(out, engine="openpyxl") as writer:
+        detalle.sort_values(["Cantón","Distrito","Tipo"]).to_excel(writer, index=False, sheet_name="seguimiento")
+        resumen_consent.to_excel(writer, index=False, sheet_name="consentimiento")
+    excel_bytes = out.getvalue()
+
     st.download_button(
         "⬇️ Descargar seguimiento (Excel)",
         data=excel_bytes,
@@ -486,5 +672,3 @@ with col2:
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         use_container_width=True
     )
-
-
