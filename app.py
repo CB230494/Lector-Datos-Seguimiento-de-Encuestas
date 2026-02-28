@@ -651,6 +651,7 @@ with col2:
     )
     show[["Tipo","Distrito","Meta","Contabilizado","% Avance","Pendiente","No_Consent"]],
     use_container_width=True,
-    hide_index=True
-)
+    hide_index=True 
+    )
+
 
