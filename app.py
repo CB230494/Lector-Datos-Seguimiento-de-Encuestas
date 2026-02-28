@@ -12,12 +12,7 @@ import matplotlib.pyplot as plt
 st.set_page_config(page_title="Seguimiento de Encuestas", layout="centered")
 
 # =========================================================
-# ✅ PRECARGA METAS + DISTRITOS (D1 a D19 - hasta ACOSTA)
-# - Tipo: Comunidad/Comercio/Policial
-# - Delegación: nombre del bloque (Carmen, Merced, etc.)
-# - Cantón_real: por ahora estas son del GAM (las dejamos así)
-# - Distrito: lista de distritos usados para validar/ubicar
-# - Meta: Comunidad/Comercio; Policial = None
+# ✅ PRECARGA METAS + DISTRITOS (D1 a D29)
 # =========================================================
 METAS_PRELOAD = [
     # --- D1 Carmen ---
@@ -160,6 +155,117 @@ METAS_PRELOAD = [
     {"Tipo":"Comunidad","Delegación":"Acosta","Cantón_real":"Acosta","Distrito":"Sabanillas","Meta":46},
     {"Tipo":"Comercio","Delegación":"Acosta","Cantón_real":"Acosta","Distrito":"Acosta","Meta":159},
     {"Tipo":"Policial","Delegación":"Acosta","Cantón_real":"Acosta","Distrito":"Acosta","Meta":None},
+
+    # =====================================================
+    # ✅ NUEVAS (D20 a D29)
+    # =====================================================
+
+    # --- D20 Alajuelita ---
+    {"Tipo":"Comunidad","Delegación":"Alajuelita","Cantón_real":"Alajuelita","Distrito":"Alajuelita","Meta":49},
+    {"Tipo":"Comunidad","Delegación":"Alajuelita","Cantón_real":"Alajuelita","Distrito":"San Josecito","Meta":52},
+    {"Tipo":"Comunidad","Delegación":"Alajuelita","Cantón_real":"Alajuelita","Distrito":"San Antonio","Meta":24},
+    {"Tipo":"Comunidad","Delegación":"Alajuelita","Cantón_real":"Alajuelita","Distrito":"Concepcion","Meta":33},
+    {"Tipo":"Comunidad","Delegación":"Alajuelita","Cantón_real":"Alajuelita","Distrito":"San Felipe","Meta":165},
+    {"Tipo":"Comercio","Delegación":"Alajuelita","Cantón_real":"Alajuelita","Distrito":"Alajuelita","Meta":159},
+    {"Tipo":"Policial","Delegación":"Alajuelita","Cantón_real":"Alajuelita","Distrito":"Alajuelita","Meta":None},
+
+    # --- D21 Escazu ---
+    {"Tipo":"Comunidad","Delegación":"Escazu","Cantón_real":"Escazu","Distrito":"Escazu","Meta":70},
+    {"Tipo":"Comunidad","Delegación":"Escazu","Cantón_real":"Escazu","Distrito":"San Antonio","Meta":154},
+    {"Tipo":"Comunidad","Delegación":"Escazu","Cantón_real":"Escazu","Distrito":"San Rafael","Meta":159},
+    {"Tipo":"Comercio","Delegación":"Escazu","Cantón_real":"Escazu","Distrito":"Escazu","Meta":287},
+    {"Tipo":"Policial","Delegación":"Escazu","Cantón_real":"Escazu","Distrito":"Escazu","Meta":None},
+
+    # --- D22 Santa Ana ---
+    {"Tipo":"Comunidad","Delegación":"Santa Ana","Cantón_real":"Santa Ana","Distrito":"Santa Ana","Meta":75},
+    {"Tipo":"Comunidad","Delegación":"Santa Ana","Cantón_real":"Santa Ana","Distrito":"Salitral","Meta":36},
+    {"Tipo":"Comunidad","Delegación":"Santa Ana","Cantón_real":"Santa Ana","Distrito":"Pozos","Meta":128},
+    {"Tipo":"Comunidad","Delegación":"Santa Ana","Cantón_real":"Santa Ana","Distrito":"Uruca","Meta":57},
+    {"Tipo":"Comunidad","Delegación":"Santa Ana","Cantón_real":"Santa Ana","Distrito":"Piedades","Meta":65},
+    {"Tipo":"Comunidad","Delegación":"Santa Ana","Cantón_real":"Santa Ana","Distrito":"Brasil","Meta":21},
+    {"Tipo":"Comercio","Delegación":"Santa Ana","Cantón_real":"Santa Ana","Distrito":"Santa Ana","Meta":227},
+    {"Tipo":"Policial","Delegación":"Santa Ana","Cantón_real":"Santa Ana","Distrito":"Santa Ana","Meta":None},
+
+    # --- D23 Mora ---
+    {"Tipo":"Comunidad","Delegación":"Mora","Cantón_real":"Mora","Distrito":"Colon","Meta":205},
+    {"Tipo":"Comunidad","Delegación":"Mora","Cantón_real":"Mora","Distrito":"Guayabo","Meta":58},
+    {"Tipo":"Comunidad","Delegación":"Mora","Cantón_real":"Mora","Distrito":"Tabarcia","Meta":48},
+    {"Tipo":"Comunidad","Delegación":"Mora","Cantón_real":"Mora","Distrito":"Piedras Negras","Meta":7},
+    {"Tipo":"Comunidad","Delegación":"Mora","Cantón_real":"Mora","Distrito":"Picagres","Meta":13},
+    {"Tipo":"Comunidad","Delegación":"Mora","Cantón_real":"Mora","Distrito":"Quitirrisí","Meta":29},
+    {"Tipo":"Comunidad","Delegación":"Mora","Cantón_real":"Mora","Distrito":"Jaris","Meta":21},
+    {"Tipo":"Comercio","Delegación":"Mora","Cantón_real":"Mora","Distrito":"Mora","Meta":77},
+    {"Tipo":"Policial","Delegación":"Mora","Cantón_real":"Mora","Distrito":"Mora","Meta":None},
+
+    # --- D24 Puriscal ---
+    {"Tipo":"Comunidad","Delegación":"Puriscal","Cantón_real":"Puriscal","Distrito":"Santiago","Meta":120},
+    {"Tipo":"Comunidad","Delegación":"Puriscal","Cantón_real":"Puriscal","Distrito":"Mercedes Sur","Meta":71},
+    {"Tipo":"Comunidad","Delegación":"Puriscal","Cantón_real":"Puriscal","Distrito":"Barbacoas","Meta":45},
+    {"Tipo":"Comunidad","Delegación":"Puriscal","Cantón_real":"Puriscal","Distrito":"Grifo Alto","Meta":15},
+    {"Tipo":"Comunidad","Delegación":"Puriscal","Cantón_real":"Puriscal","Distrito":"San Rafael","Meta":20},
+    {"Tipo":"Comunidad","Delegación":"Puriscal","Cantón_real":"Puriscal","Distrito":"Candelaria","Meta":18},
+    {"Tipo":"Comunidad","Delegación":"Puriscal","Cantón_real":"Puriscal","Distrito":"Desamparaditos","Meta":8},
+    {"Tipo":"Comunidad","Delegación":"Puriscal","Cantón_real":"Puriscal","Distrito":"San Antonio","Meta":47},
+    {"Tipo":"Comunidad","Delegación":"Puriscal","Cantón_real":"Puriscal","Distrito":"Chires","Meta":36},
+    {"Tipo":"Comercio","Delegación":"Puriscal","Cantón_real":"Puriscal","Distrito":"Puriscal","Meta":98},
+    {"Tipo":"Policial","Delegación":"Puriscal","Cantón_real":"Puriscal","Distrito":"Puriscal","Meta":None},
+
+    # --- D25 Turrubares ---
+    {"Tipo":"Comunidad","Delegación":"Turrubares","Cantón_real":"Turrubares","Distrito":"San Pablo","Meta":78},
+    {"Tipo":"Comunidad","Delegación":"Turrubares","Cantón_real":"Turrubares","Distrito":"San Pedro","Meta":45},
+    {"Tipo":"Comunidad","Delegación":"Turrubares","Cantón_real":"Turrubares","Distrito":"San Juan de Mata","Meta":82},
+    {"Tipo":"Comunidad","Delegación":"Turrubares","Cantón_real":"Turrubares","Distrito":"San Luis","Meta":38},
+    {"Tipo":"Comunidad","Delegación":"Turrubares","Cantón_real":"Turrubares","Distrito":"Carara","Meta":122},
+    {"Tipo":"Comercio","Delegación":"Turrubares","Cantón_real":"Turrubares","Distrito":"Turrubares","Meta":9},
+    {"Tipo":"Policial","Delegación":"Turrubares","Cantón_real":"Turrubares","Distrito":"Turrubares","Meta":None},
+
+    # --- D26 Alajuela Sur ---
+    {"Tipo":"Comunidad","Delegación":"Alajuela Sur","Cantón_real":"Alajuela","Distrito":"Guacima","Meta":93},
+    {"Tipo":"Comunidad","Delegación":"Alajuela Sur","Cantón_real":"Alajuela","Distrito":"Turrucares","Meta":31},
+    {"Tipo":"Comunidad","Delegación":"Alajuela Sur","Cantón_real":"Alajuela","Distrito":"San Rafael","Meta":118},
+    {"Tipo":"Comunidad","Delegación":"Alajuela Sur","Cantón_real":"Alajuela","Distrito":"Garita","Meta":33},
+    {"Tipo":"Comunidad","Delegación":"Alajuela Sur","Cantón_real":"Alajuela","Distrito":"San Antonio","Meta":109},
+    {"Tipo":"Comercio","Delegación":"Alajuela Sur","Cantón_real":"Alajuela","Distrito":"Alajuela S","Meta":219},
+    {"Tipo":"Policial","Delegación":"Alajuela Sur","Cantón_real":"Alajuela","Distrito":"Alajuela S","Meta":None},
+
+    # --- D27 Alajuela Norte ---
+    {"Tipo":"Comunidad","Delegación":"Alajuela Norte","Cantón_real":"Alajuela","Distrito":"Alajuela","Meta":84},
+    {"Tipo":"Comunidad","Delegación":"Alajuela Norte","Cantón_real":"Alajuela","Distrito":"Carrizal","Meta":17},
+    {"Tipo":"Comunidad","Delegación":"Alajuela Norte","Cantón_real":"Alajuela","Distrito":"San Jose","Meta":100},
+    {"Tipo":"Comunidad","Delegación":"Alajuela Norte","Cantón_real":"Alajuela","Distrito":"San Isidro","Meta":43},
+    {"Tipo":"Comunidad","Delegación":"Alajuela Norte","Cantón_real":"Alajuela","Distrito":"Sabanilla","Meta":24},
+    {"Tipo":"Comunidad","Delegación":"Alajuela Norte","Cantón_real":"Alajuela","Distrito":"Rio Segundo","Meta":26},
+    {"Tipo":"Comunidad","Delegación":"Alajuela Norte","Cantón_real":"Alajuela","Distrito":"Desamparados","Meta":63},
+    {"Tipo":"Comunidad","Delegación":"Alajuela Norte","Cantón_real":"Alajuela","Distrito":"Tambor","Meta":28},
+    {"Tipo":"Comercio","Delegación":"Alajuela Norte","Cantón_real":"Alajuela","Distrito":"Alajuela N","Meta":300},
+    {"Tipo":"Policial","Delegación":"Alajuela Norte","Cantón_real":"Alajuela","Distrito":"Alajuela N","Meta":None},
+
+    # --- D28 San Ramon ---
+    {"Tipo":"Comunidad","Delegación":"San Ramon","Cantón_real":"San Ramon","Distrito":"San Ramon","Meta":43},
+    {"Tipo":"Comunidad","Delegación":"San Ramon","Cantón_real":"San Ramon","Distrito":"Santiago","Meta":29},
+    {"Tipo":"Comunidad","Delegación":"San Ramon","Cantón_real":"San Ramon","Distrito":"San Juan","Meta":67},
+    {"Tipo":"Comunidad","Delegación":"San Ramon","Cantón_real":"San Ramon","Distrito":"Piedades Norte","Meta":49},
+    {"Tipo":"Comunidad","Delegación":"San Ramon","Cantón_real":"San Ramon","Distrito":"Piedades Sur","Meta":23},
+    {"Tipo":"Comunidad","Delegación":"San Ramon","Cantón_real":"San Ramon","Distrito":"San Rafael","Meta":56},
+    {"Tipo":"Comunidad","Delegación":"San Ramon","Cantón_real":"San Ramon","Distrito":"San Isidro","Meta":30},
+    {"Tipo":"Comunidad","Delegación":"San Ramon","Cantón_real":"San Ramon","Distrito":"Angeles","Meta":13},
+    {"Tipo":"Comunidad","Delegación":"San Ramon","Cantón_real":"San Ramon","Distrito":"Alfaro","Meta":43},
+    {"Tipo":"Comunidad","Delegación":"San Ramon","Cantón_real":"San Ramon","Distrito":"Volio","Meta":14},
+    {"Tipo":"Comunidad","Delegación":"San Ramon","Cantón_real":"San Ramon","Distrito":"Concepcion","Meta":13},
+    {"Tipo":"Comunidad","Delegación":"San Ramon","Cantón_real":"San Ramon","Distrito":"Zapotal","Meta":3},
+    {"Tipo":"Comercio","Delegación":"San Ramon","Cantón_real":"San Ramon","Distrito":"San Ramon","Meta":213},
+    {"Tipo":"Policial","Delegación":"San Ramon","Cantón_real":"San Ramon","Distrito":"San Ramon","Meta":None},
+
+    # --- D29 Grecia ---
+    {"Tipo":"Comunidad","Delegación":"Grecia","Cantón_real":"Grecia","Distrito":"Grecia","Meta":73},
+    {"Tipo":"Comunidad","Delegación":"Grecia","Cantón_real":"Grecia","Distrito":"San Isidro","Meta":36},
+    {"Tipo":"Comunidad","Delegación":"Grecia","Cantón_real":"Grecia","Distrito":"San Jose","Meta":50},
+    {"Tipo":"Comunidad","Delegación":"Grecia","Cantón_real":"Grecia","Distrito":"San Roque","Meta":66},
+    {"Tipo":"Comunidad","Delegación":"Grecia","Cantón_real":"Grecia","Distrito":"Tacares","Meta":49},
+    {"Tipo":"Comunidad","Delegación":"Grecia","Cantón_real":"Grecia","Distrito":"Puente de Piedra","Meta":65},
+    {"Tipo":"Comunidad","Delegación":"Grecia","Cantón_real":"Grecia","Distrito":"Bolivar","Meta":44},
+    {"Tipo":"Comercio","Delegación":"Grecia","Cantón_real":"Grecia","Distrito":"Grecia","Meta":230},
+    {"Tipo":"Policial","Delegación":"Grecia","Cantón_real":"Grecia","Distrito":"Grecia","Meta":None},
 ]
 
 # =========================
@@ -247,7 +353,6 @@ def choose_deleg_col(cols):
     found = pick_col(cols, preferred)
     if found:
         return found
-    # fallback: cualquier col que mencione canton/delegacion
     for c in cols:
         nc = norm(c)
         if "delegacion" in nc or "delegación" in nc or "canton" in nc or "cantón" in nc:
@@ -285,20 +390,23 @@ def build_catalog_from_metas(df_metas: pd.DataFrame) -> dict:
 
 def ubicar_distrito(deleg: str, texto: str, catalog: dict) -> str | None:
     k = norm(deleg)
-    t = norm(texto)
     distritos = catalog.get(k, [])
     if not distritos:
         return None
 
     # exacto
+    t = norm(texto)
     for d in distritos:
         if norm(d) == t:
             return d
+
     # contiene
     for d in distritos:
-        if norm(d) and norm(d) in t:
+        nd = norm(d)
+        if nd and nd in t:
             return d
-    # fuzzy dentro de esa delegación
+
+    # fuzzy
     fm = best_match(texto, distritos, cutoff=0.78)
     return fm
 
@@ -337,14 +445,14 @@ def build_table_image_png(title: str, distritos: list, df_full: pd.DataFrame, ti
     rows = []
     row_kind = []
     for d in distritos:
-        rows.append(["", d, "", "", "", ""])  # sección
+        rows.append(["", d, "", "", "", ""])
         row_kind.append("section")
         sub = df_full[df_full["Distrito"] == d]
         for t in tipos_order:
             r = sub[sub["Tipo"] == t].iloc[0]
-            meta = "" if pd.isna(r["Meta"]) else str(int(r["Meta"]))
-            pct = "" if pd.isna(r["% Avance"]) else fmt_pct(r["% Avance"])
-            pend = "" if pd.isna(r["Pendiente"]) else str(int(r["Pendiente"]))
+            meta = "" if pd.isna(r["Meta"]) or r["Meta"] is None else str(int(r["Meta"]))
+            pct = "" if pd.isna(r["% Avance"]) or r["% Avance"] is None else fmt_pct(r["% Avance"])
+            pend = "" if pd.isna(r["Pendiente"]) or r["Pendiente"] is None else str(int(r["Pendiente"]))
             rows.append([t, d, meta, str(int(r["Contabilizado"])), pct, pend])
             row_kind.append("data")
 
@@ -480,8 +588,6 @@ def prep_file(file, tipo_label: str):
         df["_Distrito_"] = df.apply(resolver, axis=1)
 
     df["_Tipo_"] = tipo_label
-
-    # limpiar filas sin consentimiento válido
     df = df.dropna(subset=["_Consent_", "_Deleg_", "_Distrito_"])
 
     return df[["_Tipo_", "_Deleg_", "_Distrito_", "_Consent_"]].rename(
@@ -508,7 +614,7 @@ if errs:
 
 base = pd.concat(data, ignore_index=True)
 
-# NO total
+# NO total (rechazaron)
 no_total = int((base["Consent"] == "NO").sum())
 
 # solo SI contabiliza
@@ -524,13 +630,14 @@ sel_deleg = st.sidebar.selectbox("Delegación para el cuadro", delegaciones_pret
 metas_deleg = metas[metas["Delegación"] == sel_deleg].copy()
 agg_deleg = agg[agg["Delegación"] == sel_deleg].copy()
 
-# distritos que existen en metas (orden)
+# distritos base (ordenados desde metas)
 distritos = sorted(metas_deleg["Distrito"].unique().tolist(), key=lambda x: norm(x))
 if not incluir_no_identificado:
     distritos = [d for d in distritos if d != "NO_IDENTIFICADO"]
 
-# construir df_full (1 fila por distrito-tipo) basado en metas
 tipos_order = ["Comunidad", "Comercio", "Policial"]
+
+# construir df_full (1 fila por distrito-tipo) basado en metas
 rows = []
 for d in distritos:
     for t in tipos_order:
@@ -628,7 +735,7 @@ col1, col2 = st.columns(2)
 with col1:
     png_bytes = build_table_image_png(sel_deleg, distritos, df_full, tipos_order, fecha_txt, hora_manual, no_total)
     st.download_button(
-        "📷 Descargar cuadro como imagen (PNG)",
+        label="📷 Descargar cuadro como imagen (PNG)",
         data=png_bytes,
         file_name=f"cuadro_encuestas_{sel_deleg}.png".replace(" ", "_"),
         mime="image/png",
@@ -636,23 +743,18 @@ with col1:
     )
 
 with col2:
-    # Excel detalle del SI (y su meta si aplica)
     detalle = df_full.copy()
     detalle["Delegación"] = sel_deleg
     detalle = detalle[["Delegación","Tipo","Distrito","Meta","Contabilizado","% Avance","Pendiente"]].copy()
-    detalle["% Avance"] = detalle["% Avance"].round(1)
+    detalle["% Avance"] = pd.to_numeric(detalle["% Avance"], errors="coerce").round(1)
     excel_bytes = to_excel_bytes(detalle, sheet_name="seguimiento")
     st.download_button(
-        "⬇️ Descargar seguimiento (Excel)",
+        label="⬇️ Descargar seguimiento (Excel)",
         data=excel_bytes,
         file_name=f"seguimiento_{sel_deleg}.xlsx".replace(" ", "_"),
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         use_container_width=True
     )
-    show[["Tipo","Distrito","Meta","Contabilizado","% Avance","Pendiente","No_Consent"]],
-    use_container_width=True,
-    hide_index=True 
-    
 
 
 
