@@ -13,10 +13,7 @@ import matplotlib.pyplot as plt
 st.set_page_config(page_title="Seguimiento de Encuestas", layout="centered")
 
 # =========================================================
-# ✅ PRECARGA METAS + DISTRITOS (D1 a D59)
-# - (Tu bloque D1 a D29 va EXACTO como lo pegaste)
-# - ✅ Aquí agrego al final 10 delegaciones más (Barva, Santo Domingo, Santa Barbara,
-#   San Rafael, San Isidro, Belen, Flores, San Pablo, Liberia, Nicoya) con sus metas.
+# ✅ PRECARGA METAS + DISTRITOS (D1 a D29 + 10 NUEVAS)
 # =========================================================
 METAS_PRELOAD = [
     # --- D1 Carmen ---
@@ -272,98 +269,103 @@ METAS_PRELOAD = [
     {"Tipo":"Policial","Delegación":"Grecia","Cantón_real":"Grecia","Distrito":"Grecia","Meta":None},
 
     # =====================================================
-    # ✅ NUEVAS 10 DELEGACIONES (D50 a D59) — MISMA DINÁMICA
+    # ✅ +10 NUEVAS (según tus imágenes)
     # =====================================================
 
-    # --- D50 Barva ---
-    {"Tipo":"Comunidad","Delegación":"Barva","Cantón_real":"Barva","Distrito":"Barva","Meta":37},
-    {"Tipo":"Comunidad","Delegación":"Barva","Cantón_real":"Barva","Distrito":"San Pedro","Meta":58},
-    {"Tipo":"Comunidad","Delegación":"Barva","Cantón_real":"Barva","Distrito":"San Pablo","Meta":81},
-    {"Tipo":"Comunidad","Delegación":"Barva","Cantón_real":"Barva","Distrito":"San Roque","Meta":44},
-    {"Tipo":"Comunidad","Delegación":"Barva","Cantón_real":"Barva","Distrito":"Puente Salas","Meta":38},
-    {"Tipo":"Comunidad","Delegación":"Barva","Cantón_real":"Barva","Distrito":"Santa Lucia","Meta":68},
-    {"Tipo":"Comunidad","Delegación":"Barva","Cantón_real":"Barva","Distrito":"San Jose de la Montaña","Meta":56},
-    {"Tipo":"Comercio","Delegación":"Barva","Cantón_real":"Barva","Distrito":"Barva","Meta":107},
-    {"Tipo":"Policial","Delegación":"Barva","Cantón_real":"Barva","Distrito":"Barva","Meta":None},
+    # --- Santa Cruz ---
+    {"Tipo":"Comunidad","Delegación":"Santa Cruz","Cantón_real":"Santa Cruz","Distrito":"Santa Cruz","Meta":145},
+    {"Tipo":"Comunidad","Delegación":"Santa Cruz","Cantón_real":"Santa Cruz","Distrito":"Bolson","Meta":12},
+    {"Tipo":"Comunidad","Delegación":"Santa Cruz","Cantón_real":"Santa Cruz","Distrito":"Veintisiete de Abril","Meta":51},
+    {"Tipo":"Comunidad","Delegación":"Santa Cruz","Cantón_real":"Santa Cruz","Distrito":"Tempate","Meta":36},
+    {"Tipo":"Comunidad","Delegación":"Santa Cruz","Cantón_real":"Santa Cruz","Distrito":"Cartagena","Meta":28},
+    {"Tipo":"Comunidad","Delegación":"Santa Cruz","Cantón_real":"Santa Cruz","Distrito":"Cuajiniquil","Meta":15},
+    {"Tipo":"Comunidad","Delegación":"Santa Cruz","Cantón_real":"Santa Cruz","Distrito":"Diria","Meta":26},
+    {"Tipo":"Comunidad","Delegación":"Santa Cruz","Cantón_real":"Santa Cruz","Distrito":"Cabo Velas","Meta":25},
+    {"Tipo":"Comunidad","Delegación":"Santa Cruz","Cantón_real":"Santa Cruz","Distrito":"Tamarindo","Meta":45},
+    {"Tipo":"Comercio","Delegación":"Santa Cruz","Cantón_real":"Santa Cruz","Distrito":"Santa Cruz","Meta":166},
+    {"Tipo":"Policial","Delegación":"Santa Cruz","Cantón_real":"Santa Cruz","Distrito":"Santa Cruz","Meta":None},
 
-    # --- D51 Santo Domingo ---
-    {"Tipo":"Comunidad","Delegación":"Santo Domingo","Cantón_real":"Santo Domingo","Distrito":"Santo Domingo","Meta":38},
-    {"Tipo":"Comunidad","Delegación":"Santo Domingo","Cantón_real":"Santo Domingo","Distrito":"San Vicente","Meta":66},
-    {"Tipo":"Comunidad","Delegación":"Santo Domingo","Cantón_real":"Santo Domingo","Distrito":"San Miguel","Meta":65},
-    {"Tipo":"Comunidad","Delegación":"Santo Domingo","Cantón_real":"Santo Domingo","Distrito":"Santo Tomas","Meta":65},
-    {"Tipo":"Comunidad","Delegación":"Santo Domingo","Cantón_real":"Santo Domingo","Distrito":"Santa Rosa","Meta":76},
-    {"Tipo":"Comunidad","Delegación":"Santo Domingo","Cantón_real":"Santo Domingo","Distrito":"Tures","Meta":37},
-    {"Tipo":"Comunidad","Delegación":"Santo Domingo","Cantón_real":"Santo Domingo","Distrito":"Para","Meta":35},
-    {"Tipo":"Comercio","Delegación":"Santo Domingo","Cantón_real":"Santo Domingo","Distrito":"Santo Domingo","Meta":172},
-    {"Tipo":"Policial","Delegación":"Santo Domingo","Cantón_real":"Santo Domingo","Distrito":"Santo Domingo","Meta":None},
+    # --- Bagaces ---
+    {"Tipo":"Comunidad","Delegación":"Bagaces","Cantón_real":"Bagaces","Distrito":"Bagaces","Meta":259},
+    {"Tipo":"Comunidad","Delegación":"Bagaces","Cantón_real":"Bagaces","Distrito":"Fortuna","Meta":44},
+    {"Tipo":"Comunidad","Delegación":"Bagaces","Cantón_real":"Bagaces","Distrito":"Mogote","Meta":58},
+    {"Tipo":"Comunidad","Delegación":"Bagaces","Cantón_real":"Bagaces","Distrito":"Rio Naranjo","Meta":18},
+    {"Tipo":"Comercio","Delegación":"Bagaces","Cantón_real":"Bagaces","Distrito":"Bagaces","Meta":43},
+    {"Tipo":"Policial","Delegación":"Bagaces","Cantón_real":"Bagaces","Distrito":"Bagaces","Meta":None},
 
-    # --- D52 Santa Barbara ---
-    {"Tipo":"Comunidad","Delegación":"Santa Barbara","Cantón_real":"Santa Barbara","Distrito":"Santa Barbara","Meta":52},
-    {"Tipo":"Comunidad","Delegación":"Santa Barbara","Cantón_real":"Santa Barbara","Distrito":"San Pedro","Meta":61},
-    {"Tipo":"Comunidad","Delegación":"Santa Barbara","Cantón_real":"Santa Barbara","Distrito":"San Juan","Meta":83},
-    {"Tipo":"Comunidad","Delegación":"Santa Barbara","Cantón_real":"Santa Barbara","Distrito":"Jesus","Meta":103},
-    {"Tipo":"Comunidad","Delegación":"Santa Barbara","Cantón_real":"Santa Barbara","Distrito":"Santo Domingo","Meta":32},
-    {"Tipo":"Comunidad","Delegación":"Santa Barbara","Cantón_real":"Santa Barbara","Distrito":"Puraba","Meta":49},
-    {"Tipo":"Comercio","Delegación":"Santa Barbara","Cantón_real":"Santa Barbara","Distrito":"Santa Barbara","Meta":150},
-    {"Tipo":"Policial","Delegación":"Santa Barbara","Cantón_real":"Santa Barbara","Distrito":"Santa Barbara","Meta":None},
+    # --- Carrillo ---
+    {"Tipo":"Comunidad","Delegación":"Carrillo","Cantón_real":"Carrillo","Distrito":"Filadelfia","Meta":65},
+    {"Tipo":"Comunidad","Delegación":"Carrillo","Cantón_real":"Carrillo","Distrito":"Palmira","Meta":56},
+    {"Tipo":"Comunidad","Delegación":"Carrillo","Cantón_real":"Carrillo","Distrito":"Sardinal","Meta":165},
+    {"Tipo":"Comunidad","Delegación":"Carrillo","Cantón_real":"Carrillo","Distrito":"Belen","Meta":96},
+    {"Tipo":"Comercio","Delegación":"Carrillo","Cantón_real":"Carrillo","Distrito":"Carrillo","Meta":102},
+    {"Tipo":"Policial","Delegación":"Carrillo","Cantón_real":"Carrillo","Distrito":"Carrillo","Meta":None},
 
-    # --- D53 San Rafael ---
-    {"Tipo":"Comunidad","Delegación":"San Rafael","Cantón_real":"San Rafael","Distrito":"San Rafael","Meta":69},
-    {"Tipo":"Comunidad","Delegación":"San Rafael","Cantón_real":"San Rafael","Distrito":"San Josecito","Meta":98},
-    {"Tipo":"Comunidad","Delegación":"San Rafael","Cantón_real":"San Rafael","Distrito":"Santiago","Meta":72},
-    {"Tipo":"Comunidad","Delegación":"San Rafael","Cantón_real":"San Rafael","Distrito":"Angeles","Meta":90},
-    {"Tipo":"Comunidad","Delegación":"San Rafael","Cantón_real":"San Rafael","Distrito":"Concepcion","Meta":54},
-    {"Tipo":"Comercio","Delegación":"San Rafael","Cantón_real":"San Rafael","Distrito":"San Rafael","Meta":108},
-    {"Tipo":"Policial","Delegación":"San Rafael","Cantón_real":"San Rafael","Distrito":"San Rafael","Meta":None},
+    # --- Cañas ---
+    {"Tipo":"Comunidad","Delegación":"Cañas","Cantón_real":"Cañas","Distrito":"Cañas","Meta":303},
+    {"Tipo":"Comunidad","Delegación":"Cañas","Cantón_real":"Cañas","Distrito":"Palmira","Meta":16},
+    {"Tipo":"Comunidad","Delegación":"Cañas","Cantón_real":"Cañas","Distrito":"San Miguel","Meta":23},
+    {"Tipo":"Comunidad","Delegación":"Cañas","Cantón_real":"Cañas","Distrito":"Bebedero","Meta":29},
+    {"Tipo":"Comunidad","Delegación":"Cañas","Cantón_real":"Cañas","Distrito":"Porozal","Meta":9},
+    {"Tipo":"Comercio","Delegación":"Cañas","Cantón_real":"Cañas","Distrito":"Cañas","Meta":89},
+    {"Tipo":"Policial","Delegación":"Cañas","Cantón_real":"Cañas","Distrito":"Cañas","Meta":None},
 
-    # --- D54 San Isidro ---
-    {"Tipo":"Comunidad","Delegación":"San Isidro","Cantón_real":"San Isidro","Distrito":"San Isidro","Meta":98},
-    {"Tipo":"Comunidad","Delegación":"San Isidro","Cantón_real":"San Isidro","Distrito":"San Jose","Meta":145},
-    {"Tipo":"Comunidad","Delegación":"San Isidro","Cantón_real":"San Isidro","Distrito":"Concepcion","Meta":50},
-    {"Tipo":"Comunidad","Delegación":"San Isidro","Cantón_real":"San Isidro","Distrito":"San Francisco","Meta":86},
-    {"Tipo":"Comercio","Delegación":"San Isidro","Cantón_real":"San Isidro","Distrito":"San Isidro","Meta":92},
-    {"Tipo":"Policial","Delegación":"San Isidro","Cantón_real":"San Isidro","Distrito":"San Isidro","Meta":None},
+    # --- Abangares ---
+    {"Tipo":"Comunidad","Delegación":"Abangares","Cantón_real":"Abangares","Distrito":"Juntas","Meta":192},
+    {"Tipo":"Comunidad","Delegación":"Abangares","Cantón_real":"Abangares","Distrito":"Sierra","Meta":54},
+    {"Tipo":"Comunidad","Delegación":"Abangares","Cantón_real":"Abangares","Distrito":"San Juan","Meta":36},
+    {"Tipo":"Comunidad","Delegación":"Abangares","Cantón_real":"Abangares","Distrito":"Colorado","Meta":96},
+    {"Tipo":"Comercio","Delegación":"Abangares","Cantón_real":"Abangares","Distrito":"Abangares","Meta":51},
+    {"Tipo":"Policial","Delegación":"Abangares","Cantón_real":"Abangares","Distrito":"Abangares","Meta":None},
 
-    # --- D55 Belen ---
-    {"Tipo":"Comunidad","Delegación":"Belen","Cantón_real":"Belen","Distrito":"San Antonio","Meta":158},
-    {"Tipo":"Comunidad","Delegación":"Belen","Cantón_real":"Belen","Distrito":"Ribera","Meta":113},
-    {"Tipo":"Comunidad","Delegación":"Belen","Cantón_real":"Belen","Distrito":"Asuncion","Meta":108},
-    {"Tipo":"Comercio","Delegación":"Belen","Cantón_real":"Belen","Distrito":"Belen","Meta":173},
-    {"Tipo":"Policial","Delegación":"Belen","Cantón_real":"Belen","Distrito":"Belen","Meta":None},
+    # --- Tilaran ---
+    {"Tipo":"Comunidad","Delegación":"Tilaran","Cantón_real":"Tilaran","Distrito":"Tilaran","Meta":141},
+    {"Tipo":"Comunidad","Delegación":"Tilaran","Cantón_real":"Tilaran","Distrito":"Quebrada Grande","Meta":47},
+    {"Tipo":"Comunidad","Delegación":"Tilaran","Cantón_real":"Tilaran","Distrito":"Tronadora","Meta":31},
+    {"Tipo":"Comunidad","Delegación":"Tilaran","Cantón_real":"Tilaran","Distrito":"Santa Rosa","Meta":34},
+    {"Tipo":"Comunidad","Delegación":"Tilaran","Cantón_real":"Tilaran","Distrito":"Libano","Meta":15},
+    {"Tipo":"Comunidad","Delegación":"Tilaran","Cantón_real":"Tilaran","Distrito":"Tierra Morenas","Meta":24},
+    {"Tipo":"Comunidad","Delegación":"Tilaran","Cantón_real":"Tilaran","Distrito":"Arenal","Meta":41},
+    {"Tipo":"Comunidad","Delegación":"Tilaran","Cantón_real":"Tilaran","Distrito":"Cabeceras","Meta":46},
+    {"Tipo":"Comercio","Delegación":"Tilaran","Cantón_real":"Tilaran","Distrito":"Tilaran","Meta":74},
+    {"Tipo":"Policial","Delegación":"Tilaran","Cantón_real":"Tilaran","Distrito":"Tilaran","Meta":None},
 
-    # --- D56 Flores ---
-    {"Tipo":"Comunidad","Delegación":"Flores","Cantón_real":"Flores","Distrito":"San Joaquin","Meta":133},
-    {"Tipo":"Comunidad","Delegación":"Flores","Cantón_real":"Flores","Distrito":"Barrantes","Meta":41},
-    {"Tipo":"Comunidad","Delegación":"Flores","Cantón_real":"Flores","Distrito":"Llorente","Meta":204},
-    {"Tipo":"Comercio","Delegación":"Flores","Cantón_real":"Flores","Distrito":"Flores","Meta":112},
-    {"Tipo":"Policial","Delegación":"Flores","Cantón_real":"Flores","Distrito":"Flores","Meta":None},
+    # --- Nandayure ---
+    {"Tipo":"Comunidad","Delegación":"Nandayure","Cantón_real":"Nandayure","Distrito":"Carmona","Meta":89},
+    {"Tipo":"Comunidad","Delegación":"Nandayure","Cantón_real":"Nandayure","Distrito":"Santa Rita","Meta":46},
+    {"Tipo":"Comunidad","Delegación":"Nandayure","Cantón_real":"Nandayure","Distrito":"Zapotal","Meta":39},
+    {"Tipo":"Comunidad","Delegación":"Nandayure","Cantón_real":"Nandayure","Distrito":"San Pablo","Meta":73},
+    {"Tipo":"Comunidad","Delegación":"Nandayure","Cantón_real":"Nandayure","Distrito":"Porvenir","Meta":24},
+    {"Tipo":"Comunidad","Delegación":"Nandayure","Cantón_real":"Nandayure","Distrito":"Bejuco","Meta":102},
+    {"Tipo":"Comercio","Delegación":"Nandayure","Cantón_real":"Nandayure","Distrito":"Nandayure","Meta":38},
+    {"Tipo":"Policial","Delegación":"Nandayure","Cantón_real":"Nandayure","Distrito":"Nandayure","Meta":None},
 
-    # --- D57 San Pablo ---
-    {"Tipo":"Comunidad","Delegación":"San Pablo","Cantón_real":"San Pablo","Distrito":"San Pablo","Meta":252},
-    {"Tipo":"Comunidad","Delegación":"San Pablo","Cantón_real":"San Pablo","Distrito":"Rincon de Sabanilla","Meta":128},
-    {"Tipo":"Comercio","Delegación":"San Pablo","Cantón_real":"San Pablo","Distrito":"San Pablo","Meta":86},
-    {"Tipo":"Policial","Delegación":"San Pablo","Cantón_real":"San Pablo","Distrito":"San Pablo","Meta":None},
+    # --- Hojancha ---
+    {"Tipo":"Comunidad","Delegación":"Hojancha","Cantón_real":"Hojancha","Distrito":"Hojancha","Meta":151},
+    {"Tipo":"Comunidad","Delegación":"Hojancha","Cantón_real":"Hojancha","Distrito":"Monte Romo","Meta":36},
+    {"Tipo":"Comunidad","Delegación":"Hojancha","Cantón_real":"Hojancha","Distrito":"Puerto Carrillo","Meta":98},
+    {"Tipo":"Comunidad","Delegación":"Hojancha","Cantón_real":"Hojancha","Distrito":"Matambu","Meta":42},
+    {"Tipo":"Comunidad","Delegación":"Hojancha","Cantón_real":"Hojancha","Distrito":"Huacas","Meta":38},
+    {"Tipo":"Comercio","Delegación":"Hojancha","Cantón_real":"Hojancha","Distrito":"Hojancha","Meta":18},
+    {"Tipo":"Policial","Delegación":"Hojancha","Cantón_real":"Hojancha","Distrito":"Hojancha","Meta":None},
 
-    # --- D58 Liberia ---
-    {"Tipo":"Comunidad","Delegación":"Liberia","Cantón_real":"Liberia","Distrito":"Liberia","Meta":322},
-    {"Tipo":"Comunidad","Delegación":"Liberia","Cantón_real":"Liberia","Distrito":"Cañas Dulces","Meta":20},
-    {"Tipo":"Comunidad","Delegación":"Liberia","Cantón_real":"Liberia","Distrito":"Mayorga","Meta":10},
-    {"Tipo":"Comunidad","Delegación":"Liberia","Cantón_real":"Liberia","Distrito":"Nacascolo","Meta":15},
-    {"Tipo":"Comunidad","Delegación":"Liberia","Cantón_real":"Liberia","Distrito":"Curubande","Meta":16},
-    {"Tipo":"Comercio","Delegación":"Liberia","Cantón_real":"Liberia","Distrito":"Liberia","Meta":191},
-    {"Tipo":"Policial","Delegación":"Liberia","Cantón_real":"Liberia","Distrito":"Liberia","Meta":None},
+    # --- La Cruz ---
+    {"Tipo":"Comunidad","Delegación":"La Cruz","Cantón_real":"La Cruz","Distrito":"La Cruz","Meta":178},
+    {"Tipo":"Comunidad","Delegación":"La Cruz","Cantón_real":"La Cruz","Distrito":"Santa Cecilia","Meta":124},
+    {"Tipo":"Comunidad","Delegación":"La Cruz","Cantón_real":"La Cruz","Distrito":"Garita","Meta":37},
+    {"Tipo":"Comunidad","Delegación":"La Cruz","Cantón_real":"La Cruz","Distrito":"Santa Elena","Meta":42},
+    {"Tipo":"Comercio","Delegación":"La Cruz","Cantón_real":"La Cruz","Distrito":"La Cruz","Meta":33},
+    {"Tipo":"Policial","Delegación":"La Cruz","Cantón_real":"La Cruz","Distrito":"La Cruz","Meta":None},
 
-    # --- D59 Nicoya ---
-    {"Tipo":"Comunidad","Delegación":"Nicoya","Cantón_real":"Nicoya","Distrito":"Nicoya","Meta":177},
-    {"Tipo":"Comunidad","Delegación":"Nicoya","Cantón_real":"Nicoya","Distrito":"Mansion","Meta":35},
-    {"Tipo":"Comunidad","Delegación":"Nicoya","Cantón_real":"Nicoya","Distrito":"San Antonio","Meta":46},
-    {"Tipo":"Comunidad","Delegación":"Nicoya","Cantón_real":"Nicoya","Distrito":"Quebrada Honda","Meta":16},
-    {"Tipo":"Comunidad","Delegación":"Nicoya","Cantón_real":"Nicoya","Distrito":"Samara","Meta":33},
-    {"Tipo":"Comunidad","Delegación":"Nicoya","Cantón_real":"Nicoya","Distrito":"Nosara","Meta":54},
-    {"Tipo":"Comunidad","Delegación":"Nicoya","Cantón_real":"Nicoya","Distrito":"Belen de Nosarita","Meta":20},
-    {"Tipo":"Comercio","Delegación":"Nicoya","Cantón_real":"Nicoya","Distrito":"Nicoya","Meta":132},
-    {"Tipo":"Policial","Delegación":"Nicoya","Cantón_real":"Nicoya","Distrito":"Nicoya","Meta":None},
+    # --- Puntarenas ---
+    {"Tipo":"Comunidad","Delegación":"Puntarenas","Cantón_real":"Puntarenas","Distrito":"Puntarenas","Meta":41},
+    {"Tipo":"Comunidad","Delegación":"Puntarenas","Cantón_real":"Puntarenas","Distrito":"Barranca","Meta":166},
+    {"Tipo":"Comunidad","Delegación":"Puntarenas","Cantón_real":"Puntarenas","Distrito":"Chacarita","Meta":87},
+    {"Tipo":"Comunidad","Delegación":"Puntarenas","Cantón_real":"Puntarenas","Distrito":"El Roble","Meta":88},
+    {"Tipo":"Comercio","Delegación":"Puntarenas","Cantón_real":"Puntarenas","Distrito":"Puntarenas","Meta":203},
+    {"Tipo":"Policial","Delegación":"Puntarenas","Cantón_real":"Puntarenas","Distrito":"Puntarenas","Meta":None},
 ]
+# ============================== FIN PARTE 1 / 5 ==========================================
 # ================================ PARTE 2 / 5 ============================================
 # =========================
 # Utilidades
@@ -852,3 +854,5 @@ with col2:
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         use_container_width=True
     )
+
+
