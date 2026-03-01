@@ -1,3 +1,4 @@
+# ================================ PARTE 1 / 5 ============================================
 # -*- coding: utf-8 -*-
 import io
 import datetime as dt
@@ -12,7 +13,7 @@ import matplotlib.pyplot as plt
 st.set_page_config(page_title="Seguimiento de Encuestas", layout="centered")
 
 # =========================================================
-# ✅ PRECARGA METAS + DISTRITOS (D1 a D39)
+# ✅ PRECARGA METAS + DISTRITOS (D1 a D49)
 # =========================================================
 METAS_PRELOAD = [
     # --- D1 Carmen ---
@@ -156,10 +157,6 @@ METAS_PRELOAD = [
     {"Tipo":"Comercio","Delegación":"Acosta","Cantón_real":"Acosta","Distrito":"Acosta","Meta":159},
     {"Tipo":"Policial","Delegación":"Acosta","Cantón_real":"Acosta","Distrito":"Acosta","Meta":None},
 
-    # =====================================================
-    # ✅ NUEVAS (D20 a D29)
-    # =====================================================
-
     # --- D20 Alajuelita ---
     {"Tipo":"Comunidad","Delegación":"Alajuelita","Cantón_real":"Alajuelita","Distrito":"Alajuelita","Meta":49},
     {"Tipo":"Comunidad","Delegación":"Alajuelita","Cantón_real":"Alajuelita","Distrito":"San Josecito","Meta":52},
@@ -267,9 +264,9 @@ METAS_PRELOAD = [
     {"Tipo":"Comercio","Delegación":"Grecia","Cantón_real":"Grecia","Distrito":"Grecia","Meta":230},
     {"Tipo":"Policial","Delegación":"Grecia","Cantón_real":"Grecia","Distrito":"Grecia","Meta":None},
 
-    # =====================================================
-    # ✅ NUEVAS (D30 a D39)
-    # =====================================================
+    # =========================
+    # ✅ D30 a D49 (según tus imágenes)
+    # =========================
 
     # --- D30 San Mateo ---
     {"Tipo":"Comunidad","Delegación":"San Mateo","Cantón_real":"San Mateo","Distrito":"San Mateo","Meta":148},
@@ -295,7 +292,7 @@ METAS_PRELOAD = [
     {"Tipo":"Comunidad","Delegación":"Naranjo","Cantón_real":"Naranjo","Distrito":"Naranjo","Meta":128},
     {"Tipo":"Comunidad","Delegación":"Naranjo","Cantón_real":"Naranjo","Distrito":"San Miguel","Meta":46},
     {"Tipo":"Comunidad","Delegación":"Naranjo","Cantón_real":"Naranjo","Distrito":"San Jose","Meta":28},
-    {"Tipo":"Comunidad","Delegación":"Naranjo","Cantón_real":"Naranjo","Distrito":"Cirri Sur","Meta":43},
+    {"Tipo":"Comunidad","Delegación":"Naranjo","Cantón_real":"Naranjo","Distrito":"Cirrí Sur","Meta":43},
     {"Tipo":"Comunidad","Delegación":"Naranjo","Cantón_real":"Naranjo","Distrito":"San Jeronimo","Meta":32},
     {"Tipo":"Comunidad","Delegación":"Naranjo","Cantón_real":"Naranjo","Distrito":"San Juan","Meta":29},
     {"Tipo":"Comunidad","Delegación":"Naranjo","Cantón_real":"Naranjo","Distrito":"Rosario","Meta":37},
@@ -333,13 +330,13 @@ METAS_PRELOAD = [
     {"Tipo":"Policial","Delegación":"Orotina","Cantón_real":"Orotina","Distrito":"Orotina","Meta":None},
 
     # --- D36 Sarchi ---
-    {"Tipo":"Comunidad","Delegación":"Sarchi","Cantón_real":"Valverde Vega","Distrito":"Sarchi Norte","Meta":134},
-    {"Tipo":"Comunidad","Delegación":"Sarchi","Cantón_real":"Valverde Vega","Distrito":"Sarchi Sur","Meta":112},
-    {"Tipo":"Comunidad","Delegación":"Sarchi","Cantón_real":"Valverde Vega","Distrito":"Toro Amarillo","Meta":7},
-    {"Tipo":"Comunidad","Delegación":"Sarchi","Cantón_real":"Valverde Vega","Distrito":"San Pedro","Meta":76},
-    {"Tipo":"Comunidad","Delegación":"Sarchi","Cantón_real":"Valverde Vega","Distrito":"Rodriguez","Meta":49},
-    {"Tipo":"Comercio","Delegación":"Sarchi","Cantón_real":"Valverde Vega","Distrito":"Sarchi","Meta":74},
-    {"Tipo":"Policial","Delegación":"Sarchi","Cantón_real":"Valverde Vega","Distrito":"Sarchi","Meta":None},
+    {"Tipo":"Comunidad","Delegación":"Sarchi","Cantón_real":"Sarchi","Distrito":"Sarchi Norte","Meta":134},
+    {"Tipo":"Comunidad","Delegación":"Sarchi","Cantón_real":"Sarchi","Distrito":"Sarchi Sur","Meta":112},
+    {"Tipo":"Comunidad","Delegación":"Sarchi","Cantón_real":"Sarchi","Distrito":"Toro Amarillo","Meta":7},
+    {"Tipo":"Comunidad","Delegación":"Sarchi","Cantón_real":"Sarchi","Distrito":"San Pedro","Meta":76},
+    {"Tipo":"Comunidad","Delegación":"Sarchi","Cantón_real":"Sarchi","Distrito":"Rodriguez","Meta":49},
+    {"Tipo":"Comercio","Delegación":"Sarchi","Cantón_real":"Sarchi","Distrito":"Sarchi","Meta":74},
+    {"Tipo":"Policial","Delegación":"Sarchi","Cantón_real":"Sarchi","Distrito":"Sarchi","Meta":None},
 
     # --- D37 Cartago ---
     {"Tipo":"Comunidad","Delegación":"Cartago","Cantón_real":"Cartago","Distrito":"Oriental","Meta":34},
@@ -374,6 +371,94 @@ METAS_PRELOAD = [
     {"Tipo":"Comunidad","Delegación":"La Union","Cantón_real":"La Union","Distrito":"Rio Azul","Meta":51},
     {"Tipo":"Comercio","Delegación":"La Union","Cantón_real":"La Union","Distrito":"La Union","Meta":215},
     {"Tipo":"Policial","Delegación":"La Union","Cantón_real":"La Union","Distrito":"La Union","Meta":None},
+
+    # --- D40 Jimenez ---
+    {"Tipo":"Comunidad","Delegación":"Jimenez","Cantón_real":"Jimenez","Distrito":"Juan Viñas","Meta":123},
+    {"Tipo":"Comunidad","Delegación":"Jimenez","Cantón_real":"Jimenez","Distrito":"La Victoria","Meta":38},
+    {"Tipo":"Comunidad","Delegación":"Jimenez","Cantón_real":"Jimenez","Distrito":"Tucurrique","Meta":131},
+    {"Tipo":"Comunidad","Delegación":"Jimenez","Cantón_real":"Jimenez","Distrito":"Pejibaye","Meta":85},
+    {"Tipo":"Comercio","Delegación":"Jimenez","Cantón_real":"Jimenez","Distrito":"Jimenez","Meta":21},
+    {"Tipo":"Policial","Delegación":"Jimenez","Cantón_real":"Jimenez","Distrito":"Jimenez","Meta":None},
+
+    # --- D41 Turrialba ---
+    {"Tipo":"Comunidad","Delegación":"Turrialba","Cantón_real":"Turrialba","Distrito":"Turrialba","Meta":139},
+    {"Tipo":"Comunidad","Delegación":"Turrialba","Cantón_real":"Turrialba","Distrito":"La Suiza","Meta":41},
+    {"Tipo":"Comunidad","Delegación":"Turrialba","Cantón_real":"Turrialba","Distrito":"Peralta","Meta":3},
+    {"Tipo":"Comunidad","Delegación":"Turrialba","Cantón_real":"Turrialba","Distrito":"Santa Cruz","Meta":21},
+    {"Tipo":"Comunidad","Delegación":"Turrialba","Cantón_real":"Turrialba","Distrito":"Santa Teresita","Meta":29},
+    {"Tipo":"Comunidad","Delegación":"Turrialba","Cantón_real":"Turrialba","Distrito":"Pavones","Meta":25},
+    {"Tipo":"Comunidad","Delegación":"Turrialba","Cantón_real":"Turrialba","Distrito":"Tuis","Meta":15},
+    {"Tipo":"Comunidad","Delegación":"Turrialba","Cantón_real":"Turrialba","Distrito":"Tayutic","Meta":13},
+    {"Tipo":"Comunidad","Delegación":"Turrialba","Cantón_real":"Turrialba","Distrito":"Santa Rosa","Meta":31},
+    {"Tipo":"Comunidad","Delegación":"Turrialba","Cantón_real":"Turrialba","Distrito":"Tres Equis","Meta":11},
+    {"Tipo":"Comunidad","Delegación":"Turrialba","Cantón_real":"Turrialba","Distrito":"La Isabela","Meta":33},
+    {"Tipo":"Comunidad","Delegación":"Turrialba","Cantón_real":"Turrialba","Distrito":"Chirripo","Meta":22},
+    {"Tipo":"Comercio","Delegación":"Turrialba","Cantón_real":"Turrialba","Distrito":"Turrialba","Meta":196},
+    {"Tipo":"Policial","Delegación":"Turrialba","Cantón_real":"Turrialba","Distrito":"Turrialba","Meta":None},
+
+    # --- D42 Alvarado ---
+    {"Tipo":"Comunidad","Delegación":"Alvarado","Cantón_real":"Alvarado","Distrito":"Pacayas","Meta":141},
+    {"Tipo":"Comunidad","Delegación":"Alvarado","Cantón_real":"Alvarado","Distrito":"Cervantes","Meta":168},
+    {"Tipo":"Comunidad","Delegación":"Alvarado","Cantón_real":"Alvarado","Distrito":"Capellades","Meta":67},
+    {"Tipo":"Comercio","Delegación":"Alvarado","Cantón_real":"Alvarado","Distrito":"Alvarado","Meta":55},
+    {"Tipo":"Policial","Delegación":"Alvarado","Cantón_real":"Alvarado","Distrito":"Alvarado","Meta":None},
+
+    # --- D43 Oreamuno ---
+    {"Tipo":"Comunidad","Delegación":"Oreamuno","Cantón_real":"Oreamuno","Distrito":"San Rafael","Meta":216},
+    {"Tipo":"Comunidad","Delegación":"Oreamuno","Cantón_real":"Oreamuno","Distrito":"Cot","Meta":89},
+    {"Tipo":"Comunidad","Delegación":"Oreamuno","Cantón_real":"Oreamuno","Distrito":"Potrero Cerrado","Meta":21},
+    {"Tipo":"Comunidad","Delegación":"Oreamuno","Cantón_real":"Oreamuno","Distrito":"Cipreses","Meta":33},
+    {"Tipo":"Comunidad","Delegación":"Oreamuno","Cantón_real":"Oreamuno","Distrito":"Santa Rosa","Meta":24},
+    {"Tipo":"Comercio","Delegación":"Oreamuno","Cantón_real":"Oreamuno","Distrito":"Oreamuno","Meta":112},
+    {"Tipo":"Policial","Delegación":"Oreamuno","Cantón_real":"Oreamuno","Distrito":"Oreamuno","Meta":None},
+
+    # --- D44 El Guarco ---
+    {"Tipo":"Comunidad","Delegación":"El Guarco","Cantón_real":"El Guarco","Distrito":"Tejar","Meta":216},
+    {"Tipo":"Comunidad","Delegación":"El Guarco","Cantón_real":"El Guarco","Distrito":"San Isidro","Meta":96},
+    {"Tipo":"Comunidad","Delegación":"El Guarco","Cantón_real":"El Guarco","Distrito":"Patio de Agua","Meta":4},
+    {"Tipo":"Comunidad","Delegación":"El Guarco","Cantón_real":"El Guarco","Distrito":"Tobosi","Meta":66},
+    {"Tipo":"Comercio","Delegación":"El Guarco","Cantón_real":"El Guarco","Distrito":"El Guarco","Meta":117},
+    {"Tipo":"Policial","Delegación":"El Guarco","Cantón_real":"El Guarco","Distrito":"El Guarco","Meta":None},
+
+    # --- D45 Tarrazu ---
+    {"Tipo":"Comunidad","Delegación":"Tarrazu","Cantón_real":"Tarrazu","Distrito":"San Marcos","Meta":228},
+    {"Tipo":"Comunidad","Delegación":"Tarrazu","Cantón_real":"Tarrazu","Distrito":"San Lorenzo","Meta":105},
+    {"Tipo":"Comunidad","Delegación":"Tarrazu","Cantón_real":"Tarrazu","Distrito":"San Carlos","Meta":43},
+    {"Tipo":"Comercio","Delegación":"Tarrazu","Cantón_real":"Tarrazu","Distrito":"Tarrazu","Meta":77},
+    {"Tipo":"Policial","Delegación":"Tarrazu","Cantón_real":"Tarrazu","Distrito":"Tarrazu","Meta":None},
+
+    # --- D46 Dota ---
+    {"Tipo":"Comunidad","Delegación":"Dota","Cantón_real":"Dota","Distrito":"Santa Maria","Meta":239},
+    {"Tipo":"Comunidad","Delegación":"Dota","Cantón_real":"Dota","Distrito":"Jardin","Meta":33},
+    {"Tipo":"Comunidad","Delegación":"Dota","Cantón_real":"Dota","Distrito":"Copey","Meta":95},
+    {"Tipo":"Comercio","Delegación":"Dota","Cantón_real":"Dota","Distrito":"Dota","Meta":42},
+    {"Tipo":"Policial","Delegación":"Dota","Cantón_real":"Dota","Distrito":"Dota","Meta":None},
+
+    # --- D47 Leon Cortes ---
+    {"Tipo":"Comunidad","Delegación":"Leon Cortes","Cantón_real":"Leon Cortes","Distrito":"San Pablo","Meta":125},
+    {"Tipo":"Comunidad","Delegación":"Leon Cortes","Cantón_real":"Leon Cortes","Distrito":"San Andres","Meta":47},
+    {"Tipo":"Comunidad","Delegación":"Leon Cortes","Cantón_real":"Leon Cortes","Distrito":"Llano Bonito","Meta":60},
+    {"Tipo":"Comunidad","Delegación":"Leon Cortes","Cantón_real":"Leon Cortes","Distrito":"San Isidro","Meta":50},
+    {"Tipo":"Comunidad","Delegación":"Leon Cortes","Cantón_real":"Leon Cortes","Distrito":"Santa Cruz","Meta":58},
+    {"Tipo":"Comunidad","Delegación":"Leon Cortes","Cantón_real":"Leon Cortes","Distrito":"San Antonio","Meta":34},
+    {"Tipo":"Comercio","Delegación":"Leon Cortes","Cantón_real":"Leon Cortes","Distrito":"Leon Cortes","Meta":42},
+    {"Tipo":"Policial","Delegación":"Leon Cortes","Cantón_real":"Leon Cortes","Distrito":"Leon Cortes","Meta":None},
+
+    # --- D48 Guadalupe ---
+    {"Tipo":"Comunidad","Delegación":"Guadalupe","Cantón_real":"Guadalupe","Distrito":"Guadalupe","Meta":182},
+    {"Tipo":"Comunidad","Delegación":"Guadalupe","Cantón_real":"Guadalupe","Distrito":"Corralillo","Meta":132},
+    {"Tipo":"Comunidad","Delegación":"Guadalupe","Cantón_real":"Guadalupe","Distrito":"Quebradilla","Meta":66},
+    {"Tipo":"Comercio","Delegación":"Guadalupe","Cantón_real":"Guadalupe","Distrito":"Guadalupe","Meta":105},
+    {"Tipo":"Policial","Delegación":"Guadalupe","Cantón_real":"Guadalupe","Distrito":"Guadalupe","Meta":None},
+
+    # --- D49 Heredia ---
+    {"Tipo":"Comunidad","Delegación":"Heredia","Cantón_real":"Heredia","Distrito":"Heredia","Meta":46},
+    {"Tipo":"Comunidad","Delegación":"Heredia","Cantón_real":"Heredia","Distrito":"Mercedes","Meta":80},
+    {"Tipo":"Comunidad","Delegación":"Heredia","Cantón_real":"Heredia","Distrito":"San Francisco","Meta":160},
+    {"Tipo":"Comunidad","Delegación":"Heredia","Cantón_real":"Heredia","Distrito":"Ulloa","Meta":95},
+    {"Tipo":"Comunidad","Delegación":"Heredia","Cantón_real":"Heredia","Distrito":"Vara Blanca","Meta":3},
+    {"Tipo":"Comercio","Delegación":"Heredia","Cantón_real":"Heredia","Distrito":"Heredia","Meta":337},
+    {"Tipo":"Policial","Delegación":"Heredia","Cantón_real":"Heredia","Distrito":"Heredia","Meta":None},
 ]
 
 # =========================
@@ -456,16 +541,32 @@ def choose_consent_col(cols):
             return c
     return None
 
+# ✅ FIX ÚNICO: volver a detectar la columna aunque se llame Lugar/Sede o variantes
+# (no cambia nada más de tu lógica, solo evita el error "No encontré columna Cantón/Canton...")
 def choose_deleg_col(cols):
-    preferred = ["delegacion", "delegación", "canton", "cantón", "delegacion (label)", "cantón (label)"]
+    preferred = [
+        "delegacion", "delegación",
+        "canton", "cantón",
+        "cantón/canton",
+        "delegación/lugar/sede",
+        "delegacion/lugar/sede",
+        "lugar", "sede",
+        "delegacion (label)", "delegación (label)",
+        "cantón (label)", "canton (label)",
+        "delegación (texto)", "delegacion (texto)",
+        "cantón (texto)", "canton (texto)",
+    ]
     found = pick_col(cols, preferred)
     if found:
         return found
     for c in cols:
         nc = norm(c)
-        if "delegacion" in nc or "delegación" in nc or "canton" in nc or "cantón" in nc:
+        if ("delegacion" in nc) or ("canton" in nc) or ("lugar" in nc) or ("sede" in nc):
             return c
     return None
+
+# (lo demás sigue EXACTO en la PARTE 2)
+# ================================ PARTE 2 / 5 ============================================
 
 def choose_district_col(cols):
     preferred = [
@@ -701,6 +802,7 @@ def prep_file(file, tipo_label: str):
     return df[["_Tipo_", "_Deleg_", "_Distrito_", "_Consent_"]].rename(
         columns={"_Tipo_":"Tipo","_Deleg_":"Delegación","_Distrito_":"Distrito","_Consent_":"Consent"}
     )
+    # ================================ PARTE 3 / 5 ============================================
 
 data, errs = [], []
 try:
@@ -765,6 +867,7 @@ for d in distritos:
         rows.append({"Distrito": d, "Tipo": t, "Meta": meta_val, "Contabilizado": cnt, "% Avance": avance, "Pendiente": pendiente})
 
 df_full = pd.DataFrame(rows)
+# ================================ PARTE 4 / 5 ============================================
 
 # =========================
 # Render HTML (UN SOLO CUADRO)
@@ -863,3 +966,5 @@ with col2:
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         use_container_width=True
     )
+    # ================================ PARTE 5 / 5 ============================================
+# ✅ FIN DEL ARCHIVO
