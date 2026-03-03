@@ -1,20 +1,14 @@
 # app.py
 # -*- coding: utf-8 -*-
 """
-📊 Conteo SI/NO por pregunta (columna) para encuestas (Policial / Comercio / Comunidad)
-
-✅ Lee 1 o muchos CSV (ArcGIS Survey123 incluidos, aunque el header tenga comas raras)
-✅ Detecta columnas binarias (mayoría SI/NO) y te deja elegir cuál contar por archivo
-✅ Identifica Tipo y Lugar desde el nombre del archivo (ej: Policial_Guarco_2026_0.csv)
-✅ Muestra resumen por archivo + resumen agrupado por Tipo/Lugar/Pregunta
-✅ Porcentajes con formato correcto (ej: 89.66%) y columnas de % como texto
-✅ Exporta resumen a Excel (incluye % como porcentaje real)
-
-Instalar:
-    pip install streamlit pandas openpyxl
-
-Ejecutar:
-    streamlit run app.py
+Dashboard por Delegación (Sembremos Seguridad)
+- Lee CSVs (Comunidad / Comercio / Policial)
+- Contabiliza "SI" (por defecto en la pregunta: "¿Acepta participar en esta encuesta?")
+- Comunidad: desglosa por Distrito (si existe columna de distrito)
+- Metas: las ingresás manualmente (por distrito o por delegación)
+- Calcula % Avance y Pendiente como en tu tabla
+- Fecha del sistema (automática) + Hora por delegación (manual)
+- Exporta PDF con el logo 001.png (del repo) y la tabla
 """
 
 import io
@@ -22,367 +16,412 @@ import re
 import csv
 import unicodedata
 from pathlib import Path
+from datetime import datetime
 
 import pandas as pd
 import streamlit as st
 
-st.set_page_config(page_title="Conteo SI/NO - Encuestas", layout="wide")
+# PDF
+from reportlab.lib.pagesizes import letter
+from reportlab.lib import colors
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image as RLImage
+from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib.units import inch
+
+st.set_page_config(page_title="Sembremos Seguridad - Reporte", layout="wide")
 
 
 # -----------------------------
-# Normalización / utilidades
+# Helpers de texto / fecha
 # -----------------------------
 def _strip_accents(s: str) -> str:
     s = unicodedata.normalize("NFD", s)
     return "".join(ch for ch in s if unicodedata.category(ch) != "Mn")
 
 
-def normalize_cell(val) -> str:
-    """Normaliza cualquier celda a texto simple, sin acentos y en minúscula."""
+def norm(val) -> str:
     if val is None:
         return ""
-    v = str(val).strip().strip("\ufeff")  # BOM
+    v = str(val).strip().strip("\ufeff")
     v = v.replace("\n", " ").replace("\r", " ").strip()
-    v_low = _strip_accents(v.lower())
-    return v_low
+    return _strip_accents(v.lower())
+
+
+SPANISH_WEEKDAYS = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
+SPANISH_MONTHS = ["enero", "febrero", "marzo", "abril", "mayo", "junio",
+                  "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"]
+
+
+def fecha_es(dt: datetime) -> str:
+    wd = SPANISH_WEEKDAYS[dt.weekday()]
+    month = SPANISH_MONTHS[dt.month - 1]
+    return f"{wd}, {dt.day} de {month} de {dt.year}"
 
 
 def infer_tipo_lugar(filename: str, header_row_cells: list[str]) -> tuple[str, str]:
-    """
-    Intenta inferir Tipo/Lugar:
-    1) Por nombre de archivo: Policial_Guarco_2026_0.csv
-    2) Por encabezado: "Encuesta policial – Guarco"
-    """
     base = Path(filename).stem
-
     m = re.match(r"(?i)^(policial|comunidad|comercio)_(.+?)_(\d{4}).*", base)
     if m:
-        tipo = m.group(1).capitalize()
-        lugar = m.group(2).replace("_", " ").strip()
-        return tipo, lugar
+        return m.group(1).capitalize(), m.group(2).replace("_", " ").strip()
 
     if header_row_cells:
         joined = " | ".join(header_row_cells[:12])
         m2 = re.search(r"(?i)encuesta\s+(policial|comunidad|comercio)\s*[–-]\s*([^|,]+)", joined)
         if m2:
-            tipo = m2.group(1).capitalize()
-            lugar = m2.group(2).strip()
-            return tipo, lugar
+            return m2.group(1).capitalize(), m2.group(2).strip()
 
     return "Desconocida", base
 
 
 # -----------------------------
-# Parser robusto CSV
+# CSV robusto
 # -----------------------------
-def parse_csv_rows(file_bytes: bytes):
-    """
-    Lee CSV con csv.reader (robusto ante comillas y contenido con comas).
-    Importante: no convertimos directo a DataFrame porque algunos CSV de Survey123
-    traen encabezados/filas con longitudes diferentes.
-    """
+def parse_csv(file_bytes: bytes):
     text = file_bytes.decode("utf-8-sig", errors="replace")
     reader = csv.reader(io.StringIO(text), delimiter=",", quotechar='"', skipinitialspace=False)
-
     rows = []
     for row in reader:
         if not row:
             continue
-        if all(normalize_cell(c) == "" for c in row):
+        if all(norm(c) == "" for c in row):
             continue
         rows.append(row)
-
     if not rows:
         return [], []
-
-    header = rows[0]
-    data = rows[1:]
-    return header, data
+    return rows[0], rows[1:]
 
 
-def get_binary_columns(header, data, min_ratio=0.60, min_hits=5):
+def find_col_idx(header: list[str], candidates: list[str]) -> int | None:
     """
-    Detecta columnas donde una proporción grande de valores no-vacíos son exactamente 'si' o 'no'.
+    candidates: lista de fragmentos (normalizados) que deben aparecer en el encabezado
     """
-    if not data:
-        return []
-
-    max_len = max(len(r) for r in data) if data else len(header)
-    cols = max(len(header), max_len)
-
-    bin_cols = []
-    for j in range(cols):
-        hits = 0
-        total = 0
-        for r in data:
-            if j >= len(r):
-                continue
-            v = normalize_cell(r[j])
-            if v == "":
-                continue
-            total += 1
-            if v in ("si", "no"):
-                hits += 1
-
-        if total > 0 and hits >= min_hits and (hits / total) >= min_ratio:
-            bin_cols.append(j)
-
-    return bin_cols
+    header_norm = [norm(h) for h in header]
+    for i, h in enumerate(header_norm):
+        for c in candidates:
+            if c in h:
+                return i
+    return None
 
 
-def count_si_no_in_column(header, data, col_idx: int):
-    """Cuenta SI/NO exactos en una columna específica."""
+def count_si_in_col(header, data, col_idx: int) -> int:
     si = 0
-    no = 0
-    filas = 0
-
     for r in data:
-        filas += 1
         if col_idx >= len(r):
             continue
-        v = normalize_cell(r[col_idx])
-
-        # SOLO exactos
-        if v == "si":
+        if norm(r[col_idx]) == "si":
             si += 1
-        elif v == "no":
-            no += 1
-
-    col_name = header[col_idx] if col_idx < len(header) else f"Columna {col_idx+1}"
-    return si, no, filas, col_name
+    return si
 
 
-def safe_label(s: str, max_len=90) -> str:
-    s = str(s).replace("\n", " ").replace("\r", " ").strip()
-    if len(s) > max_len:
-        s = s[:max_len - 3] + "..."
-    return s
+def get_unique_values(header, data, col_idx: int) -> list[str]:
+    vals = set()
+    for r in data:
+        if col_idx >= len(r):
+            continue
+        v = str(r[col_idx]).strip()
+        if norm(v) == "":
+            continue
+        vals.add(v)
+    return sorted(vals, key=lambda x: _strip_accents(x.lower()))
 
 
-def pct_value(si: int, total: int) -> float:
-    """Devuelve porcentaje en escala 0..100."""
-    return (si / total * 100.0) if total else 0.0
+# -----------------------------
+# Cálculos para tabla
+# -----------------------------
+def build_rows(tipo: str, lugar: str, distritos: list[str] | None, conteos: dict, metas: dict) -> list[dict]:
+    """
+    Devuelve filas con: Tipo, Distrito, Meta, Contabilidad, % Avance, Pendiente
+    - conteos: {"<distrito o lugar>": si_count}
+    - metas: {"<distrito o lugar>": meta_int}
+    """
+    rows = []
+    if distritos:
+        for d in distritos:
+            meta = int(metas.get(d, 0) or 0)
+            cont = int(conteos.get(d, 0) or 0)
+            avance = (cont / meta) if meta > 0 else 0.0
+            pend = max(meta - cont, 0)
+            rows.append({
+                "Tipo": tipo,
+                "Distrito": d,
+                "Meta": meta,
+                "Contabilidad": cont,
+                "% Avance": avance,  # 0..1
+                "Pendiente": pend
+            })
+    else:
+        key = lugar
+        meta = int(metas.get(key, 0) or 0)
+        cont = int(conteos.get(key, 0) or 0)
+        avance = (cont / meta) if meta > 0 else 0.0
+        pend = max(meta - cont, 0)
+        rows.append({
+            "Tipo": tipo,
+            "Distrito": lugar,
+            "Meta": meta,
+            "Contabilidad": cont,
+            "% Avance": avance,
+            "Pendiente": pend
+        })
+    return rows
 
 
-def pct_text(p: float) -> str:
-    """Devuelve '89.66%' como texto."""
-    return f"{p:.2f}%"
+def format_for_screen(df: pd.DataFrame) -> pd.DataFrame:
+    out = df.copy()
+    out["% Avance"] = out["% Avance"].apply(lambda x: f"{(float(x)*100):.0f}%")
+    return out
+
+
+# -----------------------------
+# PDF
+# -----------------------------
+def build_pdf_bytes(delegacion: str, hora: str, fecha_str: str, logo_path: str | None,
+                    comunidad_df: pd.DataFrame, comercio_df: pd.DataFrame, policial_df: pd.DataFrame) -> bytes:
+    buff = io.BytesIO()
+    doc = SimpleDocTemplate(buff, pagesize=letter, leftMargin=36, rightMargin=36, topMargin=36, bottomMargin=36)
+    styles = getSampleStyleSheet()
+    story = []
+
+    # Logo
+    if logo_path and Path(logo_path).exists():
+        try:
+            img = RLImage(logo_path, width=3.2*inch, height=3.2*inch)
+            img.hAlign = "CENTER"
+            story.append(img)
+            story.append(Spacer(1, 12))
+        except Exception:
+            pass
+
+    # Título
+    story.append(Paragraph(f"<b>{delegacion}</b>", styles["Title"]))
+    story.append(Spacer(1, 6))
+    story.append(Paragraph(f"<b>Hora (manual):</b> {hora or '-'}", styles["Normal"]))
+    story.append(Paragraph(f"<b>Fecha:</b> {fecha_str}", styles["Normal"]))
+    story.append(Spacer(1, 12))
+
+    def _section(title: str, df: pd.DataFrame):
+        story.append(Paragraph(f"<b>{title}</b>", styles["Heading2"]))
+        data = [["Tipo", "Distrito", "Meta", "Contabilidad", "% Avance", "Pendiente"]]
+
+        for _, r in df.iterrows():
+            data.append([
+                str(r["Tipo"]),
+                str(r["Distrito"]),
+                str(int(r["Meta"])),
+                str(int(r["Contabilidad"])),
+                f"{int(round(float(r['% Avance']) * 100))}%",
+                str(int(r["Pendiente"]))
+            ])
+
+        tbl = Table(data, colWidths=[70, 170, 70, 90, 70, 70])
+        tbl.setStyle(TableStyle([
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#E6E6E6")),
+            ("GRID", (0, 0), (-1, -1), 0.5, colors.black),
+            ("ALIGN", (2, 1), (-1, -1), "CENTER"),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("FONTSIZE", (0, 0), (-1, -1), 9),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#FAFAFA")]),
+        ]))
+        story.append(tbl)
+        story.append(Spacer(1, 12))
+
+    _section("Comunidad", comunidad_df)
+    _section("Comercio", comercio_df)
+    _section("Policial", policial_df)
+
+    doc.build(story)
+    buff.seek(0)
+    return buff.getvalue()
 
 
 # -----------------------------
 # UI
 # -----------------------------
-st.title("📊 Conteo de respuestas SI / NO (por pregunta)")
+st.title("📄 Reporte por Delegación (Comunidad / Comercio / Policial)")
+st.caption("Contabilidad = conteo de “SI” (por defecto: “¿Acepta participar en esta encuesta?”). Metas y hora las ingresás manualmente.")
 
-st.write(
-    "Subí uno o varios CSV y elegí la **pregunta/columna** a contar. "
-    "La app cuenta **solo SI/NO exactos** (no cuenta textos como 'no_se_aplica', etc.)."
-)
-
-files = st.file_uploader(
-    "Cargar CSV (puedes seleccionar varios)",
-    type=["csv"],
-    accept_multiple_files=True
-)
-
+# Cargar CSVs
+files = st.file_uploader("Cargá los CSV (pueden ser varios)", type=["csv"], accept_multiple_files=True)
 if not files:
-    st.info("Subí tus CSV para generar el conteo.")
+    st.info("Subí los CSV para armar el reporte.")
     st.stop()
+
+# Logo (tu repo)
+logo_default = "001.png"
+logo_path = logo_default if Path(logo_default).exists() else None
+
+# Elegir delegación
+# Se arma catálogo de (tipo, lugar) desde los archivos
+catalog = []
+parsed = []
+for f in files:
+    header, data = parse_csv(f.getvalue())
+    tipo, lugar = infer_tipo_lugar(f.name, header or [])
+    catalog.append((tipo, lugar, f.name))
+    parsed.append((f.name, tipo, lugar, header, data))
+
+# Delegaciones únicas por "Lugar"
+lugares = sorted(list({l for _, l, _ in catalog}), key=lambda x: _strip_accents(x.lower()))
+delegacion_sel = st.selectbox("Delegación (Lugar) para armar el reporte:", lugares)
+
+# Hora manual por delegación
+hora_manual = st.text_input("Hora (manual) para el informe (ej: 14:35):", value="")
+
+# Fecha sistema (automática)
+hoy = datetime.now()
+fecha_str = fecha_es(hoy)
 
 st.divider()
 
-results = []
+# Config: pregunta para contar SI
+st.subheader("1) ¿De cuál pregunta tomamos el SI para Contabilidad?")
+st.caption("Por defecto, usa la columna que contenga 'Acepta participar'. Si no la detecta, podés elegir otra.")
+# candidatos típicos
+prefer_candidates = ["acepta participar", "acepta_participar", "consent", "consentimiento"]
 
-# Parámetros de detección (por si querés ajustar)
-with st.expander("⚙️ Ajustes de detección (opcional)"):
-    min_ratio = st.slider("Proporción mínima SI/NO para detectar columna binaria", 0.30, 0.95, 0.60, 0.05)
-    min_hits = st.number_input("Mínimo de SI/NO para considerar la columna", min_value=1, max_value=1000, value=5, step=1)
+# Para cada tipo (comunidad/comercio/policial) buscamos el header correspondiente del archivo de esa delegación
+def pick_file(tipo_needed: str):
+    for (fname, tipo, lugar, header, data) in parsed:
+        if lugar == delegacion_sel and tipo.lower() == tipo_needed.lower():
+            return fname, header, data
+    return None, None, None
 
-st.caption("Tip: si una columna tiene pocos registros, bajá el mínimo de ocurrencias (min_hits).")
+fname_com, head_com, data_com = pick_file("Comunidad")
+fname_con, head_con, data_con = pick_file("Comercio")
+fname_pol, head_pol, data_pol = pick_file("Policial")
 
-# Procesar cada archivo
-for f in files:
-    data_bytes = f.getvalue()
-    header, data_rows = parse_csv_rows(data_bytes)
-
-    tipo, lugar = infer_tipo_lugar(f.name, header or [])
-
-    st.markdown(f"## 📌 {f.name}")
-    st.write(f"**Tipo:** {tipo}  |  **Lugar:** {lugar}")
-
+# Selector por tipo, si existe
+def col_selector(tipo_label: str, header: list[str] | None):
     if not header:
-        st.error("Este CSV viene vacío o no pude leer el encabezado.")
-        continue
+        return None
+    default_idx = find_col_idx(header, prefer_candidates)
+    labels = [f"[{i+1}] {header[i]}" for i in range(len(header))]
+    if default_idx is None:
+        default_idx = 0
+    choice = st.selectbox(f"Columna para contar SI ({tipo_label}):", labels, index=default_idx, key=f"col_{tipo_label}")
+    sel = labels.index(choice)
+    return sel
 
-    # Detectar columnas binarias
-    bin_cols = get_binary_columns(header, data_rows, min_ratio=float(min_ratio), min_hits=int(min_hits))
+col_si_com = col_selector("Comunidad", head_com) if head_com else None
+col_si_con = col_selector("Comercio", head_con) if head_con else None
+col_si_pol = col_selector("Policial", head_pol) if head_pol else None
 
-    # Opciones: primero columnas binarias detectadas
-    options = []
-    for j in bin_cols:
-        nm = header[j] if j < len(header) else f"Columna {j+1}"
-        options.append((j, nm))
+st.divider()
+st.subheader("2) Tabla (Metas manuales + cálculo automático)")
 
-    # Si no detecta alguna, permitir escoger cualquier columna
-    allow_all = st.checkbox("Mostrar TODAS las columnas (si no aparece la que querés)", key=f"all_{f.name}")
-    if allow_all:
-        existing = {idx for idx, _ in options}
-        for j in range(len(header)):
-            if j not in existing:
-                options.append((j, header[j]))
+# Comunidad: buscar columna distrito
+comunidad_rows = []
+comunidad_metas = {}
+comunidad_conteos = {}
 
-    if not options:
-        st.warning("No detecté columnas binarias. Activá 'Mostrar TODAS las columnas' y elegí manualmente.")
-        st.divider()
-        continue
+distritos = None
+if head_com and data_com:
+    dist_idx = find_col_idx(head_com, ["distrito"])
+    if dist_idx is not None:
+        distritos = get_unique_values(head_com, data_com, dist_idx)
+        # Conteo SI por distrito
+        if col_si_com is not None:
+            for d in distritos:
+                si = 0
+                for r in data_com:
+                    if dist_idx < len(r) and col_si_com < len(r):
+                        if str(r[dist_idx]).strip() == d and norm(r[col_si_com]) == "si":
+                            si += 1
+                comunidad_conteos[d] = si
+    else:
+        # No trae distrito -> solo 1 fila por delegación
+        distritos = None
+        if col_si_com is not None:
+            comunidad_conteos[delegacion_sel] = count_si_in_col(head_com, data_com, col_si_com)
 
-    labels = [f"[{idx+1}] {safe_label(nm)}" for idx, nm in options]
-    choice = st.selectbox("Elegí la pregunta/columna a contar (SI/NO):", labels, key=f"col_{f.name}")
-    sel_idx = options[labels.index(choice)][0]
+# Comercio
+comercio_conteos = {}
+if head_con and data_con and col_si_con is not None:
+    comercio_conteos[delegacion_sel] = count_si_in_col(head_con, data_con, col_si_con)
 
-    si, no, filas, col_name = count_si_no_in_column(header, data_rows, sel_idx)
-    total = si + no
-    p_si = pct_value(si, total)
-    p_no = pct_value(no, total)
+# Policial
+policial_conteos = {}
+if head_pol and data_pol and col_si_pol is not None:
+    policial_conteos[delegacion_sel] = count_si_in_col(head_pol, data_pol, col_si_pol)
 
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("SI", si)
-    c2.metric("NO", no)
-    c3.metric("Total (SI+NO)", total)
-    c4.metric("% SI", pct_text(p_si))
+# --- Metas manuales (Data Editor) ---
+# Comunidad editor
+st.markdown("### Comunidad")
+if head_com:
+    if distritos:
+        df_meta_com = pd.DataFrame({"Distrito": distritos, "Meta": [0]*len(distritos)})
+        # prefill con session_state
+        key_meta = f"meta_com_{delegacion_sel}"
+        if key_meta in st.session_state:
+            prev = st.session_state[key_meta]
+            # mezclar
+            df_meta_com = df_meta_com.merge(prev[["Distrito", "Meta"]], on="Distrito", how="left", suffixes=("", "_prev"))
+            df_meta_com["Meta"] = df_meta_com["Meta_prev"].fillna(df_meta_com["Meta"]).astype(int)
+            df_meta_com = df_meta_com[["Distrito", "Meta"]]
 
-    # Guardar resultados (incluye % como número y como texto)
-    results.append({
-        "Archivo": f.name,
-        "Tipo": tipo,
-        "Lugar": lugar,
-        "Pregunta/Columna": col_name,
-        "Filas (respuestas)": filas,
-        "SI": si,
-        "NO": no,
-        "Total SI+NO": total,
-        "%SI": p_si,           # numérico 0..100 (para cálculos)
-        "%NO": p_no,           # numérico 0..100 (para cálculos)
-        "%SI (texto)": pct_text(p_si),
-        "%NO (texto)": pct_text(p_no),
-    })
+        edited = st.data_editor(df_meta_com, use_container_width=True, num_rows="fixed", key=f"edit_{key_meta}")
+        st.session_state[key_meta] = edited
+        comunidad_metas = {row["Distrito"]: int(row["Meta"] or 0) for _, row in edited.iterrows()}
 
-    st.divider()
+        comunidad_rows = build_rows("Comunidad", delegacion_sel, distritos, comunidad_conteos, comunidad_metas)
+    else:
+        # sin distritos
+        meta_single = st.number_input("Meta Comunidad (manual):", min_value=0, value=0, step=1, key=f"meta_com_single_{delegacion_sel}")
+        comunidad_metas[delegacion_sel] = int(meta_single)
+        comunidad_rows = build_rows("Comunidad", delegacion_sel, None, comunidad_conteos, comunidad_metas)
+else:
+    st.warning("No se cargó CSV de Comunidad para esta delegación.")
 
-if not results:
-    st.error("No se generaron resultados. Revisá que los CSV tengan datos y que estés eligiendo una columna correcta.")
-    st.stop()
-
-df = pd.DataFrame(results)
-
-# -----------------------------
-# Mostrar en pantalla con % correctos (texto)
-# -----------------------------
-st.subheader("📌 Totales generales (según columnas seleccionadas)")
-total_si = int(df["SI"].sum())
-total_no = int(df["NO"].sum())
-total_bin = total_si + total_no
-p_si_total = pct_value(total_si, total_bin)
-p_no_total = pct_value(total_no, total_bin)
-
-col1, col2, col3, col4, col5 = st.columns(5)
-col1.metric("Archivos procesados", len(df))
-col2.metric("SI (total)", total_si)
-col3.metric("NO (total)", total_no)
-col4.metric("Total (SI+NO)", total_bin)
-col5.metric("% SI (total)", pct_text(p_si_total))
-
-st.subheader("📄 Resumen por archivo")
-
-# Vista bonita para pantalla (con % como texto)
-df_view = df[[
-    "Archivo", "Tipo", "Lugar", "Pregunta/Columna",
-    "Filas (respuestas)", "SI", "NO", "Total SI+NO",
-    "%SI (texto)", "%NO (texto)"
-]].copy()
-
-df_view = df_view.rename(columns={
-    "%SI (texto)": "%SI",
-    "%NO (texto)": "%NO",
-})
-
-st.dataframe(df_view, use_container_width=True)
-
-# -----------------------------
-# Agrupado (Tipo + Lugar + Pregunta)
-# -----------------------------
-st.subheader("🧾 Resumen agrupado (Tipo + Lugar + Pregunta)")
-
-df_group = (
-    df.groupby(["Tipo", "Lugar", "Pregunta/Columna"], as_index=False)
-      .agg({
-          "Filas (respuestas)": "sum",
-          "SI": "sum",
-          "NO": "sum",
-          "Total SI+NO": "sum"
-      })
+df_comunidad = pd.DataFrame(comunidad_rows) if comunidad_rows else pd.DataFrame(
+    columns=["Tipo", "Distrito", "Meta", "Contabilidad", "% Avance", "Pendiente"]
 )
+st.dataframe(format_for_screen(df_comunidad), use_container_width=True)
 
-df_group["%SI_num"] = df_group.apply(lambda r: pct_value(int(r["SI"]), int(r["Total SI+NO"])), axis=1)
-df_group["%NO_num"] = df_group.apply(lambda r: pct_value(int(r["NO"]), int(r["Total SI+NO"])), axis=1)
-df_group["%SI"] = df_group["%SI_num"].apply(pct_text)
-df_group["%NO"] = df_group["%NO_num"].apply(pct_text)
+# Comercio editor (1 fila)
+st.markdown("### Comercio")
+if head_con:
+    meta_con = st.number_input("Meta Comercio (manual):", min_value=0, value=0, step=1, key=f"meta_con_{delegacion_sel}")
+    comercio_metas = {delegacion_sel: int(meta_con)}
+    comercio_rows = build_rows("Comercio", delegacion_sel, None, comercio_conteos, comercio_metas)
+    df_comercio = pd.DataFrame(comercio_rows)
+    st.dataframe(format_for_screen(df_comercio), use_container_width=True)
+else:
+    st.warning("No se cargó CSV de Comercio para esta delegación.")
+    df_comercio = pd.DataFrame(columns=["Tipo", "Distrito", "Meta", "Contabilidad", "% Avance", "Pendiente"])
 
-df_group_view = df_group[[
-    "Tipo", "Lugar", "Pregunta/Columna",
-    "Filas (respuestas)", "SI", "NO", "Total SI+NO",
-    "%SI", "%NO"
-]].copy()
+# Policial editor (1 fila)
+st.markdown("### Policial")
+if head_pol:
+    meta_pol = st.number_input("Meta Policial (manual):", min_value=0, value=0, step=1, key=f"meta_pol_{delegacion_sel}")
+    policial_metas = {delegacion_sel: int(meta_pol)}
+    policial_rows = build_rows("Policial", delegacion_sel, None, policial_conteos, policial_metas)
+    df_policial = pd.DataFrame(policial_rows)
+    st.dataframe(format_for_screen(df_policial), use_container_width=True)
+else:
+    st.warning("No se cargó CSV de Policial para esta delegación.")
+    df_policial = pd.DataFrame(columns=["Tipo", "Distrito", "Meta", "Contabilidad", "% Avance", "Pendiente"])
 
-st.dataframe(df_group_view, use_container_width=True)
+st.divider()
+st.subheader("3) Descargar PDF")
 
-# -----------------------------
-# Exportar Excel (porcentaje REAL)
-# - En Excel guardamos % como 0..1 para que tenga formato porcentaje correcto.
-# -----------------------------
-st.subheader("⬇️ Descargar resumen en Excel")
+# Generar PDF
+if st.button("📄 Generar PDF del reporte"):
+    pdf_bytes = build_pdf_bytes(
+        delegacion=delegacion_sel,
+        hora=hora_manual,
+        fecha_str=fecha_str,
+        logo_path=logo_path,
+        comunidad_df=df_comunidad,
+        comercio_df=df_comercio,
+        policial_df=df_policial,
+    )
+    st.success("PDF generado. Usá el botón de descarga 👇")
+    st.download_button(
+        "⬇️ Descargar PDF",
+        data=pdf_bytes,
+        file_name=f"Reporte_{delegacion_sel.replace(' ', '_')}_{hoy.strftime('%Y%m%d')}.pdf",
+        mime="application/pdf",
+    )
 
-excel_df = df.copy()
-# Convertir a proporción 0..1 para Excel
-excel_df["%SI"] = excel_df["%SI"] / 100.0
-excel_df["%NO"] = excel_df["%NO"] / 100.0
-# Quitar columnas texto en Excel si no querés duplicado
-excel_df = excel_df.drop(columns=["%SI (texto)", "%NO (texto)"], errors="ignore")
-
-excel_group = df_group.copy()
-excel_group["%SI"] = excel_group["%SI_num"] / 100.0
-excel_group["%NO"] = excel_group["%NO_num"] / 100.0
-excel_group = excel_group.drop(columns=["%SI_num", "%NO_num"], errors="ignore")
-
-out = io.BytesIO()
-with pd.ExcelWriter(out, engine="openpyxl") as writer:
-    excel_df.to_excel(writer, index=False, sheet_name="Por_archivo")
-    excel_group.to_excel(writer, index=False, sheet_name="Agrupado")
-
-    # Aplicar formato porcentaje en Excel
-    wb = writer.book
-    ws1 = writer.sheets["Por_archivo"]
-    ws2 = writer.sheets["Agrupado"]
-
-    def _format_percent(ws, header_row=1):
-        # buscar columnas %SI y %NO por nombre
-        cols = {}
-        for col in range(1, ws.max_column + 1):
-            val = ws.cell(row=header_row, column=col).value
-            if val in ("%SI", "%NO"):
-                cols[val] = col
-        for name, c in cols.items():
-            for r in range(2, ws.max_row + 1):
-                ws.cell(row=r, column=c).number_format = "0.00%"
-
-    _format_percent(ws1)
-    _format_percent(ws2)
-
-out.seek(0)
-
-st.download_button(
-    "Descargar Excel",
-    data=out,
-    file_name="resumen_si_no_encuestas.xlsx",
-    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-)
+st.caption("Nota: Contabilidad sale del conteo de SI en la columna seleccionada. Metas y hora se ingresan manualmente.")
