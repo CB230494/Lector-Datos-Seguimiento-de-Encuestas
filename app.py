@@ -118,8 +118,6 @@ def parse_csv_robusto(file_bytes: bytes):
 
 # -----------------------------
 # Detectar columna Distrito (sin confundir preguntas)
-# Acepta: "2. Distrito:" / "Distrito:" / "Distrito"
-# SOLO si el encabezado limpio termina siendo "distrito"
 # -----------------------------
 def clean_header_token(h: str) -> str:
     x = norm(h)
@@ -138,7 +136,6 @@ def find_district_col(header: list[str], data: list[list[str]]):
     if not candidates:
         return None
 
-    # elegir el candidato con valores "tipo distrito"
     def score(col):
         vals = [data[r][col] for r in range(min(len(data), 200))]
         good = 0
@@ -150,7 +147,6 @@ def find_district_col(header: list[str], data: list[list[str]]):
                 continue
             if len(vv) > 35:
                 continue
-            # si parece oración numerada, descartamos
             if re.match(r"^\d+\s*[\.\)]", vv):
                 continue
             good += 1
@@ -170,8 +166,7 @@ def get_unique_values(data, col_idx: int) -> list[str]:
 
 
 # -----------------------------
-# 🔥 Ubicar SI correctamente: ranking de columnas
-# (esto es lo que tenía “perfecto” tu primera versión)
+# Ubicar SI/NO: ranking de columnas
 # -----------------------------
 def rank_yesno_columns(header: list[str], data: list[list[str]], top_k: int = 8) -> pd.DataFrame:
     rows = []
@@ -205,7 +200,6 @@ def rank_yesno_columns(header: list[str], data: list[list[str]], top_k: int = 8)
 
 
 def choose_default_yesno_col(header: list[str], data: list[list[str]]) -> int:
-    # preferir “acepta/consent” si existe y tiene SI/NO
     prefer = ["acepta", "consent", "consentimiento"]
     best_pref = None
     best_hits = -1
@@ -222,7 +216,6 @@ def choose_default_yesno_col(header: list[str], data: list[list[str]]) -> int:
     if best_pref is not None and best_hits > 0:
         return best_pref
 
-    # si no, usar ranking
     ranked = rank_yesno_columns(header, data, top_k=1)
     if len(ranked) == 0:
         return 0
@@ -265,7 +258,7 @@ def build_base_comunidad(header, data, col_yesno):
         "NO": [no_map[k] for k in si_map.keys()]
     }).sort_values("Distrito").reset_index(drop=True)
 
-    # 🔥 filtro extra: si por error entrara una “pregunta” como distrito, la botamos
+    # filtro extra por seguridad
     df = df[~df["Distrito"].str.contains(r"\?", regex=True)]
     df = df[~df["Distrito"].str.contains(r"^\d+\.", regex=True)]
 
@@ -280,7 +273,7 @@ def build_base_simple(tipo, lugar, header, data, col_yesno):
 
 def apply_meta_calc(df_base: pd.DataFrame, key_prefix: str) -> pd.DataFrame:
     df = df_base.copy()
-    df["Contabilidad"] = df["SI"]  # ✅ como pediste: Contabilidad = SI
+    df["Contabilidad"] = df["SI"]  # Contabilidad = SI
 
     metas = []
     for i, row in df.iterrows():
@@ -304,7 +297,7 @@ def apply_meta_calc(df_base: pd.DataFrame, key_prefix: str) -> pd.DataFrame:
 # -----------------------------
 # PDF
 # -----------------------------
-def build_pdf_bytes(delegacion: str, hora: str, fecha_str: str, logo_path: str | None,
+def build_pdf_bytes(delegacion_label: str, hora_reporte: str, fecha_str: str, logo_path: str | None,
                     df_com: pd.DataFrame, df_con: pd.DataFrame, df_pol: pd.DataFrame) -> bytes:
     buff = io.BytesIO()
     doc = SimpleDocTemplate(buff, pagesize=letter, leftMargin=28, rightMargin=28, topMargin=28, bottomMargin=28)
@@ -321,9 +314,9 @@ def build_pdf_bytes(delegacion: str, hora: str, fecha_str: str, logo_path: str |
         story.append(img)
         story.append(Spacer(1, 8))
 
-    story.append(Paragraph(f"<b>{delegacion}</b>", styles["Title"]))
+    story.append(Paragraph(f"<b>{delegacion_label}</b>", styles["Title"]))
     story.append(Spacer(1, 4))
-    story.append(Paragraph(f"<b>Hora (manual):</b> {hora or '-'}", styles["Normal"]))
+    story.append(Paragraph(f"<b>Hora del reporte:</b> {hora_reporte or '-'}", styles["Normal"]))
     story.append(Paragraph(f"<b>Fecha:</b> {fecha_str}", styles["Normal"]))
     story.append(Spacer(1, 10))
 
@@ -371,7 +364,7 @@ def build_pdf_bytes(delegacion: str, hora: str, fecha_str: str, logo_path: str |
 # UI
 # -----------------------------
 st.title("📄 Reporte por Delegación (Comunidad / Comercio / Policial)")
-st.caption("Primero ubicamos y mostramos los SI/NO. Después ingresás Meta (manual) y calculamos Avance/Pendiente.")
+st.caption("Primero ubicamos SI/NO. Luego ingresás Meta (manual) para calcular Avance y Pendiente.")
 
 files = st.file_uploader("Cargá los CSV (pueden ser varios)", type=["csv"], accept_multiple_files=True)
 if not files:
@@ -390,16 +383,17 @@ for f in files:
 lugares = sorted(list(lugares), key=lambda x: strip_accents(x.lower()))
 delegacion_sel = st.selectbox("Delegación (Lugar):", lugares)
 
-hora_manual = st.text_input("Hora (manual) para el informe (ej: 14:35):", value="")
-fecha_str = fecha_es(datetime.now())
+# ✅ Cambios solicitados en etiquetas
+hora_reporte = st.text_input("Hora del reporte:", value="")
 
+fecha_str = fecha_es(datetime.now())
+delegacion_label = f"Delegación: {pretty_title(delegacion_sel)}"
 
 def pick(tipo_needed: str):
     for (fname, tipo, lugar, header, data) in parsed:
         if lugar == delegacion_sel and tipo.lower() == tipo_needed.lower():
             return fname, header, data
     return None, None, None
-
 
 fname_com, h_com, d_com = pick("Comunidad")
 fname_con, h_con, d_con = pick("Comercio")
@@ -482,8 +476,8 @@ st.subheader("3) PDF")
 
 if st.button("📄 Generar PDF"):
     pdf = build_pdf_bytes(
-        delegacion=pretty_title(delegacion_sel),
-        hora=hora_manual,
+        delegacion_label=delegacion_label,
+        hora_reporte=hora_reporte,
         fecha_str=fecha_str,
         logo_path=logo_path,
         df_com=df_comunidad,
