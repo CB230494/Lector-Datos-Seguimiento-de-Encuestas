@@ -6,7 +6,7 @@ import re
 import csv
 import unicodedata
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import pandas as pd
 import streamlit as st
@@ -222,6 +222,110 @@ def choose_default_yesno_col(header: list[str], data: list[list[str]]) -> int:
     return int(ranked.loc[0, "idx"])
 
 
+# =========================================================
+# ✅ NUEVO (2): ELIMINAR DUPLICADAS (≤ 5 minutos)
+# =========================================================
+def detect_datetime_col(header: list[str], data: list[list[str]]) -> int | None:
+    """Devuelve el índice de la columna con más valores parseables como datetime."""
+    if not header or not data:
+        return None
+
+    best_i = None
+    best_hits = 0
+
+    # probamos todas las columnas con una muestra
+    sample = data[:300]
+    for j in range(len(header)):
+        vals = [row[j] for row in sample if j < len(row)]
+        # parseo con pandas (acepta muchos formatos)
+        dt = pd.to_datetime(pd.Series(vals), errors="coerce", infer_datetime_format=True)
+        hits = int(dt.notna().sum())
+        if hits > best_hits:
+            best_hits = hits
+            best_i = j
+
+    # umbral mínimo: al menos 5 timestamps parseables
+    if best_hits >= 5:
+        return best_i
+    return None
+
+
+def dedupe_within_minutes(header: list[str], data: list[list[str]], minutes: int = 5) -> tuple[list[list[str]], int]:
+    """
+    Elimina respuestas duplicadas (mismas respuestas) dentro de un lapso de X minutos.
+    - Usa una columna de fecha/hora detectada automáticamente.
+    - Firma = todas las columnas normalizadas EXCEPTO la de fecha/hora.
+    """
+    dt_col = detect_datetime_col(header, data)
+    if dt_col is None:
+        return data, 0
+
+    # crear lista con dt parseado
+    rows = []
+    for idx, r in enumerate(data):
+        raw_dt = r[dt_col] if dt_col < len(r) else ""
+        dt = pd.to_datetime(raw_dt, errors="coerce", infer_datetime_format=True)
+        rows.append((idx, dt.to_pydatetime() if pd.notna(dt) else None, r))
+
+    # separar validas e invalidas
+    valid = [x for x in rows if x[1] is not None]
+    invalid = [x for x in rows if x[1] is None]
+
+    # ordenar por datetime
+    valid.sort(key=lambda x: x[1])
+
+    last_time_by_sig = {}
+    keep_indices = set()
+
+    window = timedelta(minutes=minutes)
+    removed = 0
+
+    for idx, dt, r in valid:
+        sig = tuple(norm(r[j]) for j in range(len(r)) if j != dt_col)
+        if sig in last_time_by_sig and (dt - last_time_by_sig[sig]) <= window:
+            removed += 1
+            continue
+        last_time_by_sig[sig] = dt
+        keep_indices.add(idx)
+
+    # invalidas se conservan (no se pueden comparar por tiempo)
+    for idx, _, _ in invalid:
+        keep_indices.add(idx)
+
+    filtered = [data[i] for i in range(len(data)) if i in keep_indices]
+    return filtered, removed
+
+
+# =========================================================
+# ✅ NUEVO (1): Agregar distritos faltantes (manual)
+# =========================================================
+def ensure_official_districts(df: pd.DataFrame, manual_districts: list[str]) -> pd.DataFrame:
+    """
+    Agrega al DF distritos que no estén presentes, con SI/NO=0.
+    df esperado: columnas Tipo, Distrito, SI, NO
+    """
+    if df.empty:
+        return df
+
+    existing = {pretty_title(x) for x in df["Distrito"].tolist()}
+    add_rows = []
+    tipo = df.iloc[0]["Tipo"]
+
+    for d in manual_districts:
+        dd = pretty_title(d)
+        if norm(dd) == "":
+            continue
+        if dd not in existing:
+            add_rows.append({"Tipo": tipo, "Distrito": dd, "SI": 0, "NO": 0})
+
+    if add_rows:
+        df = pd.concat([df, pd.DataFrame(add_rows)], ignore_index=True)
+
+    # ordenar por distrito
+    df = df.sort_values("Distrito").reset_index(drop=True)
+    return df
+
+
 # -----------------------------
 # Construir tablas base (SI/NO ya calculados)
 # -----------------------------
@@ -383,9 +487,7 @@ for f in files:
 lugares = sorted(list(lugares), key=lambda x: strip_accents(x.lower()))
 delegacion_sel = st.selectbox("Delegación (Lugar):", lugares)
 
-# ✅ Cambios solicitados en etiquetas
 hora_reporte = st.text_input("Hora del reporte:", value="")
-
 fecha_str = fecha_es(datetime.now())
 delegacion_label = f"Delegación: {pretty_title(delegacion_sel)}"
 
@@ -399,8 +501,65 @@ fname_com, h_com, d_com = pick("Comunidad")
 fname_con, h_con, d_con = pick("Comercio")
 fname_pol, h_pol, d_pol = pick("Policial")
 
+
+# =========================================================
+# ✅ NUEVO (2): toggles deduplicación por tipo
+# =========================================================
 st.divider()
-st.subheader("1) ✅ Ubicar los SI/NO (antes de metas)")
+st.subheader("0) Filtros opcionales")
+
+cA, cB, cC = st.columns(3)
+dedupe_com = cA.checkbox("Eliminar duplicadas (Comunidad) ≤ 5 min", value=False)
+dedupe_con = cB.checkbox("Eliminar duplicadas (Comercio) ≤ 5 min", value=False)
+dedupe_pol = cC.checkbox("Eliminar duplicadas (Policial) ≤ 5 min", value=False)
+
+removed_info = {"Comunidad": 0, "Comercio": 0, "Policial": 0}
+
+if h_com and d_com and dedupe_com:
+    d_com, removed = dedupe_within_minutes(h_com, d_com, minutes=5)
+    removed_info["Comunidad"] = removed
+if h_con and d_con and dedupe_con:
+    d_con, removed = dedupe_within_minutes(h_con, d_con, minutes=5)
+    removed_info["Comercio"] = removed
+if h_pol and d_pol and dedupe_pol:
+    d_pol, removed = dedupe_within_minutes(h_pol, d_pol, minutes=5)
+    removed_info["Policial"] = removed
+
+if any(v > 0 for v in removed_info.values()):
+    st.info(
+        f"Duplicadas eliminadas: Comunidad={removed_info['Comunidad']}, "
+        f"Comercio={removed_info['Comercio']}, Policial={removed_info['Policial']}."
+    )
+
+
+# =========================================================
+# ✅ NUEVO (1): distritos faltantes manuales (solo Comunidad)
+# =========================================================
+st.divider()
+st.subheader("1) Distritos oficiales (opcional) - solo Comunidad")
+st.caption("Si falta un distrito (porque no hubo respuestas), agregalo aquí y quedará con 0.")
+
+manual_districts = []
+if delegacion_sel:
+    key_off = f"off_districts_{delegacion_sel}"
+    if key_off not in st.session_state:
+        st.session_state[key_off] = pd.DataFrame({"Distrito": []})
+
+    edited_off = st.data_editor(
+        st.session_state[key_off],
+        num_rows="dynamic",
+        use_container_width=True,
+        key=f"edit_off_{delegacion_sel}"
+    )
+    st.session_state[key_off] = edited_off
+    manual_districts = [str(x).strip() for x in edited_off.get("Distrito", []).tolist() if norm(x) != ""]
+
+
+# =========================================================
+# 2) Ubicar los SI/NO (antes de metas)
+# =========================================================
+st.divider()
+st.subheader("2) ✅ Ubicar los SI/NO (antes de metas)")
 
 def ui_pick_yesno(tipo_label: str, header, data):
     if not header:
@@ -438,13 +597,21 @@ col_con = ui_pick_yesno("Comercio", h_con, d_con) if h_con else None
 st.divider()
 col_pol = ui_pick_yesno("Policial", h_pol, d_pol) if h_pol else None
 
+
+# =========================================================
+# 3) Metas manuales → % Avance y Pendiente
+# =========================================================
 st.divider()
-st.subheader("2) Metas (manual) → % Avance y Pendiente")
+st.subheader("3) Metas (manual) → % Avance y Pendiente")
 
 # Comunidad
 st.markdown("### Comunidad")
 if h_com and d_com and col_com is not None:
     base_com = build_base_comunidad(h_com, d_com, col_com)
+
+    # ✅ NUEVO: agregar distritos faltantes manuales con 0
+    base_com = ensure_official_districts(base_com, manual_districts)
+
     df_comunidad = apply_meta_calc(base_com, key_prefix=f"com_{delegacion_sel}")
     st.dataframe(df_comunidad[["Tipo","Distrito","Meta","Contabilidad","% Avance","Pendiente"]], use_container_width=True)
 else:
@@ -471,8 +638,12 @@ else:
     df_policial = pd.DataFrame(columns=["Tipo","Distrito","Meta","Contabilidad","% Avance","Pendiente"])
     st.warning("Falta CSV o columna SI/NO en Policial.")
 
+
+# =========================================================
+# 4) PDF
+# =========================================================
 st.divider()
-st.subheader("3) PDF")
+st.subheader("4) PDF")
 
 if st.button("📄 Generar PDF"):
     pdf = build_pdf_bytes(
