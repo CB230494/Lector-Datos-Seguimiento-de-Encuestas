@@ -7,7 +7,8 @@
 ✅ Detecta columnas binarias (mayoría SI/NO) y te deja elegir cuál contar por archivo
 ✅ Identifica Tipo y Lugar desde el nombre del archivo (ej: Policial_Guarco_2026_0.csv)
 ✅ Muestra resumen por archivo + resumen agrupado por Tipo/Lugar/Pregunta
-✅ Exporta resumen a Excel
+✅ Porcentajes con formato correcto (ej: 89.66%) y columnas de % como texto
+✅ Exporta resumen a Excel (incluye % como porcentaje real)
 
 Instalar:
     pip install streamlit pandas openpyxl
@@ -102,9 +103,6 @@ def parse_csv_rows(file_bytes: bytes):
 def get_binary_columns(header, data, min_ratio=0.60, min_hits=5):
     """
     Detecta columnas donde una proporción grande de valores no-vacíos son exactamente 'si' o 'no'.
-
-    - min_ratio: porcentaje mínimo de celdas válidas que deben ser si/no (0.60 = 60%)
-    - min_hits: mínimo de ocurrencias si/no para considerarla columna relevante
     """
     if not data:
         return []
@@ -161,6 +159,16 @@ def safe_label(s: str, max_len=90) -> str:
     return s
 
 
+def pct_value(si: int, total: int) -> float:
+    """Devuelve porcentaje en escala 0..100."""
+    return (si / total * 100.0) if total else 0.0
+
+
+def pct_text(p: float) -> str:
+    """Devuelve '89.66%' como texto."""
+    return f"{p:.2f}%"
+
+
 # -----------------------------
 # UI
 # -----------------------------
@@ -207,18 +215,17 @@ for f in files:
         continue
 
     # Detectar columnas binarias
-    bin_cols = get_binary_columns(header, data_rows, min_ratio=min_ratio, min_hits=int(min_hits))
+    bin_cols = get_binary_columns(header, data_rows, min_ratio=float(min_ratio), min_hits=int(min_hits))
 
-    # Construir lista de opciones: primero columnas binarias, luego (opcional) todas
+    # Opciones: primero columnas binarias detectadas
     options = []
     for j in bin_cols:
         nm = header[j] if j < len(header) else f"Columna {j+1}"
         options.append((j, nm))
 
-    # Si no detecta ninguna, permitir escoger cualquier columna para no quedar bloqueado
+    # Si no detecta alguna, permitir escoger cualquier columna
     allow_all = st.checkbox("Mostrar TODAS las columnas (si no aparece la que querés)", key=f"all_{f.name}")
     if allow_all:
-        # Agregar todas las columnas que no estén ya
         existing = {idx for idx, _ in options}
         for j in range(len(header)):
             if j not in existing:
@@ -234,17 +241,17 @@ for f in files:
     sel_idx = options[labels.index(choice)][0]
 
     si, no, filas, col_name = count_si_no_in_column(header, data_rows, sel_idx)
-
     total = si + no
-    pct_si = (si / total * 100) if total else 0.0
-    pct_no = (no / total * 100) if total else 0.0
+    p_si = pct_value(si, total)
+    p_no = pct_value(no, total)
 
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("SI", si)
     c2.metric("NO", no)
     c3.metric("Total (SI+NO)", total)
-    c4.metric("% SI", f"{pct_si:.2f}%")
+    c4.metric("% SI", pct_text(p_si))
 
+    # Guardar resultados (incluye % como número y como texto)
     results.append({
         "Archivo": f.name,
         "Tipo": tipo,
@@ -254,8 +261,10 @@ for f in files:
         "SI": si,
         "NO": no,
         "Total SI+NO": total,
-        "%SI": round(pct_si, 2),
-        "%NO": round(pct_no, 2),
+        "%SI": p_si,           # numérico 0..100 (para cálculos)
+        "%NO": p_no,           # numérico 0..100 (para cálculos)
+        "%SI (texto)": pct_text(p_si),
+        "%NO (texto)": pct_text(p_no),
     })
 
     st.divider()
@@ -266,19 +275,44 @@ if not results:
 
 df = pd.DataFrame(results)
 
-# Totales generales
+# -----------------------------
+# Mostrar en pantalla con % correctos (texto)
+# -----------------------------
 st.subheader("📌 Totales generales (según columnas seleccionadas)")
-col1, col2, col3, col4 = st.columns(4)
+total_si = int(df["SI"].sum())
+total_no = int(df["NO"].sum())
+total_bin = total_si + total_no
+p_si_total = pct_value(total_si, total_bin)
+p_no_total = pct_value(total_no, total_bin)
+
+col1, col2, col3, col4, col5 = st.columns(5)
 col1.metric("Archivos procesados", len(df))
-col2.metric("SI (total)", int(df["SI"].sum()))
-col3.metric("NO (total)", int(df["NO"].sum()))
-col4.metric("Total (SI+NO)", int(df["Total SI+NO"].sum()))
+col2.metric("SI (total)", total_si)
+col3.metric("NO (total)", total_no)
+col4.metric("Total (SI+NO)", total_bin)
+col5.metric("% SI (total)", pct_text(p_si_total))
 
 st.subheader("📄 Resumen por archivo")
-st.dataframe(df, use_container_width=True)
 
-# Agrupado
+# Vista bonita para pantalla (con % como texto)
+df_view = df[[
+    "Archivo", "Tipo", "Lugar", "Pregunta/Columna",
+    "Filas (respuestas)", "SI", "NO", "Total SI+NO",
+    "%SI (texto)", "%NO (texto)"
+]].copy()
+
+df_view = df_view.rename(columns={
+    "%SI (texto)": "%SI",
+    "%NO (texto)": "%NO",
+})
+
+st.dataframe(df_view, use_container_width=True)
+
+# -----------------------------
+# Agrupado (Tipo + Lugar + Pregunta)
+# -----------------------------
 st.subheader("🧾 Resumen agrupado (Tipo + Lugar + Pregunta)")
+
 df_group = (
     df.groupby(["Tipo", "Lugar", "Pregunta/Columna"], as_index=False)
       .agg({
@@ -289,19 +323,61 @@ df_group = (
       })
 )
 
-df_group["%SI"] = (df_group["SI"] / df_group["Total SI+NO"]).fillna(0) * 100
-df_group["%NO"] = (df_group["NO"] / df_group["Total SI+NO"]).fillna(0) * 100
-df_group["%SI"] = df_group["%SI"].round(2)
-df_group["%NO"] = df_group["%NO"].round(2)
+df_group["%SI_num"] = df_group.apply(lambda r: pct_value(int(r["SI"]), int(r["Total SI+NO"])), axis=1)
+df_group["%NO_num"] = df_group.apply(lambda r: pct_value(int(r["NO"]), int(r["Total SI+NO"])), axis=1)
+df_group["%SI"] = df_group["%SI_num"].apply(pct_text)
+df_group["%NO"] = df_group["%NO_num"].apply(pct_text)
 
-st.dataframe(df_group, use_container_width=True)
+df_group_view = df_group[[
+    "Tipo", "Lugar", "Pregunta/Columna",
+    "Filas (respuestas)", "SI", "NO", "Total SI+NO",
+    "%SI", "%NO"
+]].copy()
 
-# Export Excel
+st.dataframe(df_group_view, use_container_width=True)
+
+# -----------------------------
+# Exportar Excel (porcentaje REAL)
+# - En Excel guardamos % como 0..1 para que tenga formato porcentaje correcto.
+# -----------------------------
 st.subheader("⬇️ Descargar resumen en Excel")
+
+excel_df = df.copy()
+# Convertir a proporción 0..1 para Excel
+excel_df["%SI"] = excel_df["%SI"] / 100.0
+excel_df["%NO"] = excel_df["%NO"] / 100.0
+# Quitar columnas texto en Excel si no querés duplicado
+excel_df = excel_df.drop(columns=["%SI (texto)", "%NO (texto)"], errors="ignore")
+
+excel_group = df_group.copy()
+excel_group["%SI"] = excel_group["%SI_num"] / 100.0
+excel_group["%NO"] = excel_group["%NO_num"] / 100.0
+excel_group = excel_group.drop(columns=["%SI_num", "%NO_num"], errors="ignore")
+
 out = io.BytesIO()
 with pd.ExcelWriter(out, engine="openpyxl") as writer:
-    df.to_excel(writer, index=False, sheet_name="Por_archivo")
-    df_group.to_excel(writer, index=False, sheet_name="Agrupado")
+    excel_df.to_excel(writer, index=False, sheet_name="Por_archivo")
+    excel_group.to_excel(writer, index=False, sheet_name="Agrupado")
+
+    # Aplicar formato porcentaje en Excel
+    wb = writer.book
+    ws1 = writer.sheets["Por_archivo"]
+    ws2 = writer.sheets["Agrupado"]
+
+    def _format_percent(ws, header_row=1):
+        # buscar columnas %SI y %NO por nombre
+        cols = {}
+        for col in range(1, ws.max_column + 1):
+            val = ws.cell(row=header_row, column=col).value
+            if val in ("%SI", "%NO"):
+                cols[val] = col
+        for name, c in cols.items():
+            for r in range(2, ws.max_row + 1):
+                ws.cell(row=r, column=c).number_format = "0.00%"
+
+    _format_percent(ws1)
+    _format_percent(ws2)
+
 out.seek(0)
 
 st.download_button(
