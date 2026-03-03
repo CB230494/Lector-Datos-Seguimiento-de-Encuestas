@@ -2,13 +2,19 @@
 # -*- coding: utf-8 -*-
 """
 Dashboard por Delegación (Sembremos Seguridad)
-- Lee CSVs (Comunidad / Comercio / Policial)
-- Contabiliza "SI" (por defecto en la pregunta: "¿Acepta participar en esta encuesta?")
-- Comunidad: desglosa por Distrito (si existe columna de distrito)
-- Metas: las ingresás manualmente (por distrito o por delegación)
-- Calcula % Avance y Pendiente como en tu tabla
-- Fecha del sistema (automática) + Hora por delegación (manual)
-- Exporta PDF con el logo 001.png (del repo) y la tabla
+✅ Lee CSVs (Comunidad / Comercio / Policial)
+✅ Contabilidad = conteo de “SI” (se elige la mejor columna automáticamente)
+✅ Comunidad: desglosa por Distrito si existe columna de distrito
+✅ Metas: las ingresás manualmente (por distrito o por delegación)
+✅ Calcula % Avance y Pendiente como tu tabla
+✅ Fecha del sistema (automática) + Hora por delegación (manual)
+✅ Exporta PDF con el logo 001.png (si está en el repo)
+
+requirements.txt:
+    streamlit
+    pandas
+    openpyxl
+    reportlab
 """
 
 import io
@@ -21,7 +27,7 @@ from datetime import datetime
 import pandas as pd
 import streamlit as st
 
-# PDF
+# PDF (ReportLab)
 from reportlab.lib.pagesizes import letter
 from reportlab.lib import colors
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image as RLImage
@@ -40,16 +46,25 @@ def _strip_accents(s: str) -> str:
 
 
 def norm(val) -> str:
+    """Normaliza texto: sin acentos, minúscula, sin BOM, sin saltos."""
     if val is None:
         return ""
     v = str(val).strip().strip("\ufeff")
     v = v.replace("\n", " ").replace("\r", " ").strip()
-    return _strip_accents(v.lower())
+    v = _strip_accents(v.lower())
+
+    # normalizaciones extra comunes
+    v = v.replace("sí", "si")
+    v = v.replace("si.", "si").replace("no.", "no")
+    v = re.sub(r"\s+", " ", v).strip()
+    return v
 
 
 SPANISH_WEEKDAYS = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
-SPANISH_MONTHS = ["enero", "febrero", "marzo", "abril", "mayo", "junio",
-                  "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"]
+SPANISH_MONTHS = [
+    "enero", "febrero", "marzo", "abril", "mayo", "junio",
+    "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"
+]
 
 
 def fecha_es(dt: datetime) -> str:
@@ -59,7 +74,12 @@ def fecha_es(dt: datetime) -> str:
 
 
 def infer_tipo_lugar(filename: str, header_row_cells: list[str]) -> tuple[str, str]:
+    """
+    1) Por nombre de archivo: Policial_Guarco_2026_0.csv
+    2) Por encabezado: "Encuesta policial – Guarco"
+    """
     base = Path(filename).stem
+
     m = re.match(r"(?i)^(policial|comunidad|comercio)_(.+?)_(\d{4}).*", base)
     if m:
         return m.group(1).capitalize(), m.group(2).replace("_", " ").strip()
@@ -79,6 +99,7 @@ def infer_tipo_lugar(filename: str, header_row_cells: list[str]) -> tuple[str, s
 def parse_csv(file_bytes: bytes):
     text = file_bytes.decode("utf-8-sig", errors="replace")
     reader = csv.reader(io.StringIO(text), delimiter=",", quotechar='"', skipinitialspace=False)
+
     rows = []
     for row in reader:
         if not row:
@@ -86,21 +107,55 @@ def parse_csv(file_bytes: bytes):
         if all(norm(c) == "" for c in row):
             continue
         rows.append(row)
+
     if not rows:
         return [], []
     return rows[0], rows[1:]
 
 
 def find_col_idx(header: list[str], candidates: list[str]) -> int | None:
-    """
-    candidates: lista de fragmentos (normalizados) que deben aparecer en el encabezado
-    """
+    """Busca una columna cuyo encabezado contenga cualquiera de los fragments candidatos."""
     header_norm = [norm(h) for h in header]
     for i, h in enumerate(header_norm):
         for c in candidates:
             if c in h:
                 return i
     return None
+
+
+def best_si_column(header, data, prefer_terms=None) -> int:
+    """
+    FIX CLAVE:
+    - Si encuentra encabezado que contenga términos preferidos (ej. acepta participar / consentimiento) la usa.
+    - Si no, elige la columna con MÁS ocurrencias exactas de SI/NO.
+    """
+    if not header or not data:
+        return 0
+
+    prefer_terms = prefer_terms or []
+    header_norm = [norm(h) for h in header]
+
+    # 1) Preferida por texto en encabezado
+    for i, h in enumerate(header_norm):
+        if any(t in h for t in prefer_terms):
+            return i
+
+    # 2) Mejor columna binaria (más SI+NO)
+    best_idx = 0
+    best_hits = -1
+    for j in range(len(header)):
+        hits = 0
+        for r in data:
+            if j >= len(r):
+                continue
+            v = norm(r[j])
+            if v in ("si", "no"):
+                hits += 1
+        if hits > best_hits:
+            best_hits = hits
+            best_idx = j
+
+    return best_idx
 
 
 def count_si_in_col(header, data, col_idx: int) -> int:
@@ -130,7 +185,7 @@ def get_unique_values(header, data, col_idx: int) -> list[str]:
 # -----------------------------
 def build_rows(tipo: str, lugar: str, distritos: list[str] | None, conteos: dict, metas: dict) -> list[dict]:
     """
-    Devuelve filas con: Tipo, Distrito, Meta, Contabilidad, % Avance, Pendiente
+    Filas: Tipo, Distrito, Meta, Contabilidad, % Avance, Pendiente
     - conteos: {"<distrito o lugar>": si_count}
     - metas: {"<distrito o lugar>": meta_int}
     """
@@ -146,7 +201,7 @@ def build_rows(tipo: str, lugar: str, distritos: list[str] | None, conteos: dict
                 "Distrito": d,
                 "Meta": meta,
                 "Contabilidad": cont,
-                "% Avance": avance,  # 0..1
+                "% Avance": avance,   # 0..1
                 "Pendiente": pend
             })
     else:
@@ -168,15 +223,23 @@ def build_rows(tipo: str, lugar: str, distritos: list[str] | None, conteos: dict
 
 def format_for_screen(df: pd.DataFrame) -> pd.DataFrame:
     out = df.copy()
-    out["% Avance"] = out["% Avance"].apply(lambda x: f"{(float(x)*100):.0f}%")
+    if "% Avance" in out.columns:
+        out["% Avance"] = out["% Avance"].apply(lambda x: f"{int(round(float(x) * 100))}%")
     return out
 
 
 # -----------------------------
 # PDF
 # -----------------------------
-def build_pdf_bytes(delegacion: str, hora: str, fecha_str: str, logo_path: str | None,
-                    comunidad_df: pd.DataFrame, comercio_df: pd.DataFrame, policial_df: pd.DataFrame) -> bytes:
+def build_pdf_bytes(
+    delegacion: str,
+    hora: str,
+    fecha_str: str,
+    logo_path: str | None,
+    comunidad_df: pd.DataFrame,
+    comercio_df: pd.DataFrame,
+    policial_df: pd.DataFrame
+) -> bytes:
     buff = io.BytesIO()
     doc = SimpleDocTemplate(buff, pagesize=letter, leftMargin=36, rightMargin=36, topMargin=36, bottomMargin=36)
     styles = getSampleStyleSheet()
@@ -185,19 +248,19 @@ def build_pdf_bytes(delegacion: str, hora: str, fecha_str: str, logo_path: str |
     # Logo
     if logo_path and Path(logo_path).exists():
         try:
-            img = RLImage(logo_path, width=3.2*inch, height=3.2*inch)
+            img = RLImage(logo_path, width=3.1 * inch, height=3.1 * inch)
             img.hAlign = "CENTER"
             story.append(img)
-            story.append(Spacer(1, 12))
+            story.append(Spacer(1, 10))
         except Exception:
             pass
 
     # Título
     story.append(Paragraph(f"<b>{delegacion}</b>", styles["Title"]))
-    story.append(Spacer(1, 6))
+    story.append(Spacer(1, 4))
     story.append(Paragraph(f"<b>Hora (manual):</b> {hora or '-'}", styles["Normal"]))
     story.append(Paragraph(f"<b>Fecha:</b> {fecha_str}", styles["Normal"]))
-    story.append(Spacer(1, 12))
+    story.append(Spacer(1, 10))
 
     def _section(title: str, df: pd.DataFrame):
         story.append(Paragraph(f"<b>{title}</b>", styles["Heading2"]))
@@ -213,18 +276,18 @@ def build_pdf_bytes(delegacion: str, hora: str, fecha_str: str, logo_path: str |
                 str(int(r["Pendiente"]))
             ])
 
-        tbl = Table(data, colWidths=[70, 170, 70, 90, 70, 70])
+        tbl = Table(data, colWidths=[70, 180, 60, 90, 70, 70])
         tbl.setStyle(TableStyle([
             ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
             ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#E6E6E6")),
-            ("GRID", (0, 0), (-1, -1), 0.5, colors.black),
+            ("GRID", (0, 0), (-1, -1), 0.6, colors.black),
             ("ALIGN", (2, 1), (-1, -1), "CENTER"),
             ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
             ("FONTSIZE", (0, 0), (-1, -1), 9),
             ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#FAFAFA")]),
         ]))
         story.append(tbl)
-        story.append(Spacer(1, 12))
+        story.append(Spacer(1, 10))
 
     _section("Comunidad", comunidad_df)
     _section("Comercio", comercio_df)
@@ -239,48 +302,36 @@ def build_pdf_bytes(delegacion: str, hora: str, fecha_str: str, logo_path: str |
 # UI
 # -----------------------------
 st.title("📄 Reporte por Delegación (Comunidad / Comercio / Policial)")
-st.caption("Contabilidad = conteo de “SI” (por defecto: “¿Acepta participar en esta encuesta?”). Metas y hora las ingresás manualmente.")
+st.caption("Contabilidad = conteo de “SI” (auto-detectado). Metas y hora se ingresan manualmente.")
 
-# Cargar CSVs
 files = st.file_uploader("Cargá los CSV (pueden ser varios)", type=["csv"], accept_multiple_files=True)
 if not files:
     st.info("Subí los CSV para armar el reporte.")
     st.stop()
 
-# Logo (tu repo)
-logo_default = "001.png"
-logo_path = logo_default if Path(logo_default).exists() else None
+# Logo en repo
+logo_path = "001.png" if Path("001.png").exists() else None
 
-# Elegir delegación
-# Se arma catálogo de (tipo, lugar) desde los archivos
-catalog = []
+# Parsear archivos
 parsed = []
+lugares_set = set()
 for f in files:
     header, data = parse_csv(f.getvalue())
     tipo, lugar = infer_tipo_lugar(f.name, header or [])
-    catalog.append((tipo, lugar, f.name))
     parsed.append((f.name, tipo, lugar, header, data))
+    lugares_set.add(lugar)
 
-# Delegaciones únicas por "Lugar"
-lugares = sorted(list({l for _, l, _ in catalog}), key=lambda x: _strip_accents(x.lower()))
+lugares = sorted(list(lugares_set), key=lambda x: _strip_accents(x.lower()))
 delegacion_sel = st.selectbox("Delegación (Lugar) para armar el reporte:", lugares)
 
-# Hora manual por delegación
 hora_manual = st.text_input("Hora (manual) para el informe (ej: 14:35):", value="")
 
-# Fecha sistema (automática)
 hoy = datetime.now()
 fecha_str = fecha_es(hoy)
 
 st.divider()
 
-# Config: pregunta para contar SI
-st.subheader("1) ¿De cuál pregunta tomamos el SI para Contabilidad?")
-st.caption("Por defecto, usa la columna que contenga 'Acepta participar'. Si no la detecta, podés elegir otra.")
-# candidatos típicos
-prefer_candidates = ["acepta participar", "acepta_participar", "consent", "consentimiento"]
-
-# Para cada tipo (comunidad/comercio/policial) buscamos el header correspondiente del archivo de esa delegación
+# Tomar el archivo de cada tipo para esa delegación
 def pick_file(tipo_needed: str):
     for (fname, tipo, lugar, header, data) in parsed:
         if lugar == delegacion_sel and tipo.lower() == tipo_needed.lower():
@@ -291,35 +342,51 @@ fname_com, head_com, data_com = pick_file("Comunidad")
 fname_con, head_con, data_con = pick_file("Comercio")
 fname_pol, head_pol, data_pol = pick_file("Policial")
 
-# Selector por tipo, si existe
-def col_selector(tipo_label: str, header: list[str] | None):
-    if not header:
-        return None
-    default_idx = find_col_idx(header, prefer_candidates)
-    labels = [f"[{i+1}] {header[i]}" for i in range(len(header))]
-    if default_idx is None:
-        default_idx = 0
-    choice = st.selectbox(f"Columna para contar SI ({tipo_label}):", labels, index=default_idx, key=f"col_{tipo_label}")
-    sel = labels.index(choice)
-    return sel
+st.subheader("1) Columna usada para Contabilidad (conteo de SI)")
+st.caption("La app intenta usar 'Acepta participar / Consentimiento'. Si no, elige la columna con más SI/NO.")
 
-col_si_com = col_selector("Comunidad", head_com) if head_com else None
-col_si_con = col_selector("Comercio", head_con) if head_con else None
-col_si_pol = col_selector("Policial", head_pol) if head_pol else None
+PREFER = ["acepta participar", "acepta_participar", "consent", "consentimiento"]
+
+def col_selector(tipo_label: str, header: list[str] | None, data: list[list[str]] | None):
+    if not header:
+        st.info(f"No hay CSV de {tipo_label} para esta delegación.")
+        return None
+
+    labels = [f"[{i+1}] {header[i]}" for i in range(len(header))]
+
+    default_idx = best_si_column(header, data or [], prefer_terms=PREFER)
+    default_idx = max(0, min(default_idx, len(labels) - 1))
+
+    choice = st.selectbox(
+        f"Columna para contar SI ({tipo_label}):",
+        labels,
+        index=default_idx,
+        key=f"col_{tipo_label}_{delegacion_sel}"
+    )
+    return labels.index(choice)
+
+col_si_com = col_selector("Comunidad", head_com, data_com)
+col_si_con = col_selector("Comercio", head_con, data_con)
+col_si_pol = col_selector("Policial", head_pol, data_pol)
 
 st.divider()
 st.subheader("2) Tabla (Metas manuales + cálculo automático)")
 
-# Comunidad: buscar columna distrito
+# -----------------------------
+# Comunidad (con distrito si existe)
+# -----------------------------
+st.markdown("### Comunidad")
 comunidad_rows = []
 comunidad_metas = {}
 comunidad_conteos = {}
-
 distritos = None
+
 if head_com and data_com:
-    dist_idx = find_col_idx(head_com, ["distrito"])
+    # detectar distrito (flexible)
+    dist_idx = find_col_idx(head_com, ["distrito", "district"])
     if dist_idx is not None:
         distritos = get_unique_values(head_com, data_com, dist_idx)
+
         # Conteo SI por distrito
         if col_si_com is not None:
             for d in distritos:
@@ -330,32 +397,17 @@ if head_com and data_com:
                             si += 1
                 comunidad_conteos[d] = si
     else:
-        # No trae distrito -> solo 1 fila por delegación
-        distritos = None
+        # Sin distrito: una fila por delegación
         if col_si_com is not None:
             comunidad_conteos[delegacion_sel] = count_si_in_col(head_com, data_com, col_si_com)
 
-# Comercio
-comercio_conteos = {}
-if head_con and data_con and col_si_con is not None:
-    comercio_conteos[delegacion_sel] = count_si_in_col(head_con, data_con, col_si_con)
-
-# Policial
-policial_conteos = {}
-if head_pol and data_pol and col_si_pol is not None:
-    policial_conteos[delegacion_sel] = count_si_in_col(head_pol, data_pol, col_si_pol)
-
-# --- Metas manuales (Data Editor) ---
-# Comunidad editor
-st.markdown("### Comunidad")
 if head_com:
     if distritos:
-        df_meta_com = pd.DataFrame({"Distrito": distritos, "Meta": [0]*len(distritos)})
-        # prefill con session_state
+        df_meta_com = pd.DataFrame({"Distrito": distritos, "Meta": [0] * len(distritos)})
         key_meta = f"meta_com_{delegacion_sel}"
+
         if key_meta in st.session_state:
             prev = st.session_state[key_meta]
-            # mezclar
             df_meta_com = df_meta_com.merge(prev[["Distrito", "Meta"]], on="Distrito", how="left", suffixes=("", "_prev"))
             df_meta_com["Meta"] = df_meta_com["Meta_prev"].fillna(df_meta_com["Meta"]).astype(int)
             df_meta_com = df_meta_com[["Distrito", "Meta"]]
@@ -366,7 +418,6 @@ if head_com:
 
         comunidad_rows = build_rows("Comunidad", delegacion_sel, distritos, comunidad_conteos, comunidad_metas)
     else:
-        # sin distritos
         meta_single = st.number_input("Meta Comunidad (manual):", min_value=0, value=0, step=1, key=f"meta_com_single_{delegacion_sel}")
         comunidad_metas[delegacion_sel] = int(meta_single)
         comunidad_rows = build_rows("Comunidad", delegacion_sel, None, comunidad_conteos, comunidad_metas)
@@ -378,8 +429,15 @@ df_comunidad = pd.DataFrame(comunidad_rows) if comunidad_rows else pd.DataFrame(
 )
 st.dataframe(format_for_screen(df_comunidad), use_container_width=True)
 
-# Comercio editor (1 fila)
+# -----------------------------
+# Comercio (1 fila)
+# -----------------------------
 st.markdown("### Comercio")
+if head_con and data_con and col_si_con is not None:
+    comercio_conteos = {delegacion_sel: count_si_in_col(head_con, data_con, col_si_con)}
+else:
+    comercio_conteos = {}
+
 if head_con:
     meta_con = st.number_input("Meta Comercio (manual):", min_value=0, value=0, step=1, key=f"meta_con_{delegacion_sel}")
     comercio_metas = {delegacion_sel: int(meta_con)}
@@ -390,8 +448,15 @@ else:
     st.warning("No se cargó CSV de Comercio para esta delegación.")
     df_comercio = pd.DataFrame(columns=["Tipo", "Distrito", "Meta", "Contabilidad", "% Avance", "Pendiente"])
 
-# Policial editor (1 fila)
+# -----------------------------
+# Policial (1 fila)
+# -----------------------------
 st.markdown("### Policial")
+if head_pol and data_pol and col_si_pol is not None:
+    policial_conteos = {delegacion_sel: count_si_in_col(head_pol, data_pol, col_si_pol)}
+else:
+    policial_conteos = {}
+
 if head_pol:
     meta_pol = st.number_input("Meta Policial (manual):", min_value=0, value=0, step=1, key=f"meta_pol_{delegacion_sel}")
     policial_metas = {delegacion_sel: int(meta_pol)}
@@ -405,7 +470,6 @@ else:
 st.divider()
 st.subheader("3) Descargar PDF")
 
-# Generar PDF
 if st.button("📄 Generar PDF del reporte"):
     pdf_bytes = build_pdf_bytes(
         delegacion=delegacion_sel,
@@ -424,4 +488,4 @@ if st.button("📄 Generar PDF del reporte"):
         mime="application/pdf",
     )
 
-st.caption("Nota: Contabilidad sale del conteo de SI en la columna seleccionada. Metas y hora se ingresan manualmente.")
+st.caption("Nota: Contabilidad sale del conteo de SI en la columna seleccionada (auto-detectada por defecto).")
