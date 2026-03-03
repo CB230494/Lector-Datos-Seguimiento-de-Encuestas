@@ -1,19 +1,5 @@
 # app.py
 # -*- coding: utf-8 -*-
-"""
-REPORTE POR DELEGACIÓN - Sembremos Seguridad
-- Contabilidad = conteo de "SI" (robusto: Sí/si/SI/ " si ")
-- Comunidad: desglose por distrito si existe (detecta "2. Distrito:" y similares)
-- Meta: manual (por distrito o por delegación)
-- % Avance y Pendiente: calculados
-- PDF: logo 001.png + fecha del sistema + hora manual
-
-requirements.txt:
-streamlit
-pandas
-openpyxl
-reportlab
-"""
 
 import io
 import re
@@ -35,7 +21,7 @@ st.set_page_config(page_title="Sembremos Seguridad - Reporte", layout="wide")
 
 
 # -----------------------------
-# Normalización
+# Normalización fuerte
 # -----------------------------
 def strip_accents(s: str) -> str:
     s = unicodedata.normalize("NFD", s)
@@ -64,8 +50,7 @@ def is_no(v) -> bool:
 def pretty_title(s: str) -> str:
     if s is None:
         return ""
-    t = str(s).strip()
-    t = t.replace("_", " ").replace("-", " ")
+    t = str(s).strip().replace("_", " ").replace("-", " ")
     t = re.sub(r"\s+", " ", t).strip()
     return t.lower().title()
 
@@ -92,7 +77,6 @@ def infer_tipo_lugar(filename: str):
     m = re.match(r"(?i)^(policial|comunidad|comercio)_(.+?)_(\d{4}).*", base)
     if m:
         return m.group(1).capitalize(), m.group(2).replace("_", " ").strip()
-    # fallback
     parts = base.split("_")
     if len(parts) >= 2:
         return parts[0].capitalize(), parts[1].replace("_", " ").strip()
@@ -100,8 +84,7 @@ def infer_tipo_lugar(filename: str):
 
 
 # -----------------------------
-# CSV robusto + ALINEACIÓN de filas
-# (esto arregla el conteo SI que se te fue a 0)
+# CSV robusto + ALINEACIÓN filas
 # -----------------------------
 def parse_csv_robusto(file_bytes: bytes):
     text = file_bytes.decode("utf-8-sig", errors="replace")
@@ -111,7 +94,6 @@ def parse_csv_robusto(file_bytes: bytes):
     for row in reader:
         if not row:
             continue
-        # descartar filas completamente vacías
         if all(norm(c) == "" for c in row):
             continue
         rows.append(row)
@@ -125,7 +107,6 @@ def parse_csv_robusto(file_bytes: bytes):
 
     fixed = []
     for r in data:
-        # si viene más larga, truncar; si viene más corta, rellenar
         if len(r) > ncols:
             r = r[:ncols]
         elif len(r) < ncols:
@@ -136,15 +117,13 @@ def parse_csv_robusto(file_bytes: bytes):
 
 
 # -----------------------------
-# Detectar columna "Distrito"
-# - Acepta: "Distrito", "2. Distrito:", "Distrito:" etc.
-# - Y evita confundir preguntas largas que incluyen la palabra "distrito"
+# Detectar columna Distrito (sin confundir preguntas)
+# Acepta: "2. Distrito:" / "Distrito:" / "Distrito"
+# SOLO si el encabezado limpio termina siendo "distrito"
 # -----------------------------
 def clean_header_token(h: str) -> str:
     x = norm(h)
-    # quitar leading "2." "7)" etc
     x = re.sub(r"^\s*\d+\s*[\.\)\-:]+\s*", "", x).strip()
-    # quitar ":" final
     x = x.rstrip(":").strip()
     return x
 
@@ -153,14 +132,13 @@ def find_district_col(header: list[str], data: list[list[str]]):
     candidates = []
     for i, h in enumerate(header):
         ch = clean_header_token(h)
-        # SOLO si el encabezado (limpio) es distrito/district
         if ch in ("distrito", "district"):
             candidates.append(i)
 
     if not candidates:
         return None
 
-    # Si hay varios, elegir el que tenga valores "cortos" y sin signos de pregunta
+    # elegir el candidato con valores "tipo distrito"
     def score(col):
         vals = [data[r][col] for r in range(min(len(data), 200))]
         good = 0
@@ -168,9 +146,12 @@ def find_district_col(header: list[str], data: list[list[str]]):
             vv = str(v).strip()
             if norm(vv) == "":
                 continue
-            if "?" in vv or ":" in vv or "." in vv:
+            if "?" in vv or ":" in vv:
                 continue
             if len(vv) > 35:
+                continue
+            # si parece oración numerada, descartamos
+            if re.match(r"^\d+\s*[\.\)]", vv):
                 continue
             good += 1
         return good
@@ -179,97 +160,137 @@ def find_district_col(header: list[str], data: list[list[str]]):
     return best
 
 
-# -----------------------------
-# Elegir columna para SI/NO (Contabilidad)
-# - Preferir "Acepta participar..." si existe
-# - Si no, elegir la que tenga MÁS SI+NO
-# -----------------------------
-def best_yesno_col(header: list[str], data: list[list[str]]):
-    header_norm = [norm(h) for h in header]
-    prefer = ["acepta participar", "acepta_participar", "consent", "consentimiento"]
+def get_unique_values(data, col_idx: int) -> list[str]:
+    vals = set()
+    for r in data:
+        v = r[col_idx]
+        if norm(v) != "":
+            vals.add(str(v).strip())
+    return sorted(list(vals), key=lambda x: strip_accents(x.lower()))
 
-    for i, h in enumerate(header_norm):
-        if any(p in h for p in prefer):
-            return i
 
-    best_i = 0
-    best_hits = -1
+# -----------------------------
+# 🔥 Ubicar SI correctamente: ranking de columnas
+# (esto es lo que tenía “perfecto” tu primera versión)
+# -----------------------------
+def rank_yesno_columns(header: list[str], data: list[list[str]], top_k: int = 8) -> pd.DataFrame:
+    rows = []
     for j in range(len(header)):
-        hits = 0
+        si = 0
+        no = 0
+        filled = 0
         for r in data:
             v = r[j]
-            if is_yes(v) or is_no(v):
-                hits += 1
-        if hits > best_hits:
-            best_hits = hits
-            best_i = j
+            if norm(v) == "":
+                continue
+            filled += 1
+            if is_yes(v):
+                si += 1
+            elif is_no(v):
+                no += 1
+        hits = si + no
+        ratio = (hits / filled) if filled > 0 else 0.0
+        rows.append({
+            "idx": j,
+            "columna": header[j],
+            "SI": si,
+            "NO": no,
+            "SI+NO": hits,
+            "no_vacias": filled,
+            "ratio_SI_NO": ratio
+        })
+    df = pd.DataFrame(rows)
+    df = df.sort_values(["SI+NO", "ratio_SI_NO"], ascending=[False, False]).head(top_k).reset_index(drop=True)
+    return df
 
-    return best_i
+
+def choose_default_yesno_col(header: list[str], data: list[list[str]]) -> int:
+    # preferir “acepta/consent” si existe y tiene SI/NO
+    prefer = ["acepta", "consent", "consentimiento"]
+    best_pref = None
+    best_hits = -1
+
+    for j, h in enumerate(header):
+        hn = norm(h)
+        if any(p in hn for p in prefer):
+            si = sum(1 for r in data if is_yes(r[j]))
+            no = sum(1 for r in data if is_no(r[j]))
+            if (si + no) > best_hits:
+                best_hits = si + no
+                best_pref = j
+
+    if best_pref is not None and best_hits > 0:
+        return best_pref
+
+    # si no, usar ranking
+    ranked = rank_yesno_columns(header, data, top_k=1)
+    if len(ranked) == 0:
+        return 0
+    return int(ranked.loc[0, "idx"])
 
 
 # -----------------------------
-# Construcción de tablas
+# Construir tablas base (SI/NO ya calculados)
 # -----------------------------
-def tabla_comunidad(header, data, col_yesno):
+def build_base_comunidad(header, data, col_yesno):
     dist_col = find_district_col(header, data)
+
     if dist_col is None:
-        # sin distrito -> 1 fila
         si = sum(1 for r in data if is_yes(r[col_yesno]))
         no = sum(1 for r in data if is_no(r[col_yesno]))
-        df = pd.DataFrame([{
-            "Tipo": "Comunidad",
-            "Distrito": "TOTAL (Delegación)",
-            "SI": si,
-            "NO": no
-        }])
-        return df, False
+        return pd.DataFrame([{"Tipo": "Comunidad", "Distrito": "TOTAL (Delegación)", "SI": si, "NO": no}])
 
-    # con distrito
-    conteos = {}
-    conteos_no = {}
+    distritos_raw = get_unique_values(data, dist_col)
+
+    si_map = {pretty_title(d): 0 for d in distritos_raw}
+    no_map = {pretty_title(d): 0 for d in distritos_raw}
 
     for r in data:
         d = pretty_title(r[dist_col])
         if norm(d) == "":
             continue
-        conteos.setdefault(d, 0)
-        conteos_no.setdefault(d, 0)
+        if d not in si_map:
+            si_map[d] = 0
+            no_map[d] = 0
+
         if is_yes(r[col_yesno]):
-            conteos[d] += 1
+            si_map[d] += 1
         elif is_no(r[col_yesno]):
-            conteos_no[d] += 1
+            no_map[d] += 1
 
     df = pd.DataFrame({
         "Tipo": "Comunidad",
-        "Distrito": list(conteos.keys()),
-        "SI": list(conteos.values()),
-        "NO": [conteos_no[k] for k in conteos.keys()]
-    })
-    return df.sort_values("Distrito").reset_index(drop=True), True
+        "Distrito": list(si_map.keys()),
+        "SI": list(si_map.values()),
+        "NO": [no_map[k] for k in si_map.keys()]
+    }).sort_values("Distrito").reset_index(drop=True)
+
+    # 🔥 filtro extra: si por error entrara una “pregunta” como distrito, la botamos
+    df = df[~df["Distrito"].str.contains(r"\?", regex=True)]
+    df = df[~df["Distrito"].str.contains(r"^\d+\.", regex=True)]
+
+    return df
 
 
-def tabla_simple(tipo, lugar, header, data, col_yesno):
+def build_base_simple(tipo, lugar, header, data, col_yesno):
     si = sum(1 for r in data if is_yes(r[col_yesno]))
     no = sum(1 for r in data if is_no(r[col_yesno]))
-    return pd.DataFrame([{
-        "Tipo": tipo,
-        "Distrito": pretty_title(lugar),
-        "SI": si,
-        "NO": no
-    }])
+    return pd.DataFrame([{"Tipo": tipo, "Distrito": pretty_title(lugar), "SI": si, "NO": no}])
 
 
-def aplicar_meta_y_calculos(df: pd.DataFrame, key_prefix: str):
-    # Meta manual (por fila)
-    # Contabilidad = SI (como pediste)
-    df = df.copy()
-    df["Contabilidad"] = df["SI"]
+def apply_meta_calc(df_base: pd.DataFrame, key_prefix: str) -> pd.DataFrame:
+    df = df_base.copy()
+    df["Contabilidad"] = df["SI"]  # ✅ como pediste: Contabilidad = SI
 
-    # input de metas
     metas = []
     for i, row in df.iterrows():
-        label = f"Meta {row['Tipo']} - {row['Distrito']}"
-        meta = st.number_input(label, min_value=0, value=0, step=1, key=f"{key_prefix}_meta_{i}")
+        meta = st.number_input(
+            f"Meta {row['Tipo']} - {row['Distrito']}",
+            min_value=0,
+            value=0,
+            step=1,
+            key=f"{key_prefix}_meta_{i}"
+        )
         metas.append(int(meta))
     df["Meta"] = metas
 
@@ -277,7 +298,6 @@ def aplicar_meta_y_calculos(df: pd.DataFrame, key_prefix: str):
     df["Pendiente"] = df.apply(lambda r: max(int(r["Meta"]) - int(r["Contabilidad"]), 0), axis=1)
     df["% Avance"] = df["% Avance"].apply(lambda x: f"{int(round(float(x) * 100))}%")
 
-    # Orden de columnas final
     return df[["Tipo", "Distrito", "Meta", "Contabilidad", "% Avance", "Pendiente", "SI", "NO"]]
 
 
@@ -351,7 +371,7 @@ def build_pdf_bytes(delegacion: str, hora: str, fecha_str: str, logo_path: str |
 # UI
 # -----------------------------
 st.title("📄 Reporte por Delegación (Comunidad / Comercio / Policial)")
-st.caption("Contabilidad = conteo de SI. La Meta se ingresa manual para calcular Avance y Pendiente.")
+st.caption("Primero ubicamos y mostramos los SI/NO. Después ingresás Meta (manual) y calculamos Avance/Pendiente.")
 
 files = st.file_uploader("Cargá los CSV (pueden ser varios)", type=["csv"], accept_multiple_files=True)
 if not files:
@@ -359,7 +379,6 @@ if not files:
 
 logo_path = "001.png" if Path("001.png").exists() else None
 
-# Parsear y agrupar por lugar
 parsed = []
 lugares = set()
 for f in files:
@@ -374,66 +393,89 @@ delegacion_sel = st.selectbox("Delegación (Lugar):", lugares)
 hora_manual = st.text_input("Hora (manual) para el informe (ej: 14:35):", value="")
 fecha_str = fecha_es(datetime.now())
 
+
 def pick(tipo_needed: str):
     for (fname, tipo, lugar, header, data) in parsed:
         if lugar == delegacion_sel and tipo.lower() == tipo_needed.lower():
             return fname, header, data
     return None, None, None
 
-# Tomar archivos por tipo
-_, h_com, d_com = pick("Comunidad")
-_, h_con, d_con = pick("Comercio")
-_, h_pol, d_pol = pick("Policial")
+
+fname_com, h_com, d_com = pick("Comunidad")
+fname_con, h_con, d_con = pick("Comercio")
+fname_pol, h_pol, d_pol = pick("Policial")
 
 st.divider()
-st.subheader("1) Columna SI/NO usada para Contabilidad")
+st.subheader("1) ✅ Ubicar los SI/NO (antes de metas)")
 
-def selector_si(tipo_label: str, header, data):
+def ui_pick_yesno(tipo_label: str, header, data):
     if not header:
         st.info(f"No hay CSV de {tipo_label} para esta delegación.")
         return None
 
-    default_idx = best_yesno_col(header, data)
-    labels = [f"[{i+1}] {header[i]}" for i in range(len(header))]
-    choice = st.selectbox(f"Columna SI/NO ({tipo_label}):", labels, index=default_idx, key=f"sel_{tipo_label}_{delegacion_sel}")
-    return labels.index(choice)
+    ranked = rank_yesno_columns(header, data, top_k=8)
+    default_idx = choose_default_yesno_col(header, data)
 
-col_com = selector_si("Comunidad", h_com, d_com) if h_com else None
-col_con = selector_si("Comercio", h_con, d_con) if h_con else None
-col_pol = selector_si("Policial", h_pol, d_pol) if h_pol else None
+    st.markdown(f"**{tipo_label}:** columnas candidatas (top 8)")
+    st.dataframe(ranked[["idx","columna","SI","NO","SI+NO","ratio_SI_NO"]], use_container_width=True)
+
+    labels = [f"[{i+1}] {header[i]}" for i in range(len(header))]
+    choice = st.selectbox(
+        f"Columna SI/NO a usar ({tipo_label}):",
+        labels,
+        index=default_idx,
+        key=f"yesno_{tipo_label}_{delegacion_sel}"
+    )
+    col = labels.index(choice)
+
+    si_total = sum(1 for r in data if is_yes(r[col]))
+    no_total = sum(1 for r in data if is_no(r[col]))
+
+    c1, c2, c3 = st.columns(3)
+    c1.metric(f"{tipo_label} - SI", si_total)
+    c2.metric(f"{tipo_label} - NO", no_total)
+    c3.metric(f"{tipo_label} - SI+NO", si_total + no_total)
+
+    return col
+
+col_com = ui_pick_yesno("Comunidad", h_com, d_com) if h_com else None
+st.divider()
+col_con = ui_pick_yesno("Comercio", h_con, d_con) if h_con else None
+st.divider()
+col_pol = ui_pick_yesno("Policial", h_pol, d_pol) if h_pol else None
 
 st.divider()
-st.subheader("2) Tablas (Meta manual → Avance y Pendiente)")
+st.subheader("2) Metas (manual) → % Avance y Pendiente")
 
 # Comunidad
 st.markdown("### Comunidad")
 if h_com and d_com and col_com is not None:
-    base_com, _has_dist = tabla_comunidad(h_com, d_com, col_com)
-    df_comunidad = aplicar_meta_y_calculos(base_com, key_prefix=f"com_{delegacion_sel}")
+    base_com = build_base_comunidad(h_com, d_com, col_com)
+    df_comunidad = apply_meta_calc(base_com, key_prefix=f"com_{delegacion_sel}")
     st.dataframe(df_comunidad[["Tipo","Distrito","Meta","Contabilidad","% Avance","Pendiente"]], use_container_width=True)
 else:
     df_comunidad = pd.DataFrame(columns=["Tipo","Distrito","Meta","Contabilidad","% Avance","Pendiente"])
-    st.warning("Falta CSV de Comunidad o columna SI/NO.")
+    st.warning("Falta CSV o columna SI/NO en Comunidad.")
 
 # Comercio
 st.markdown("### Comercio")
 if h_con and d_con and col_con is not None:
-    base_con = tabla_simple("Comercio", delegacion_sel, h_con, d_con, col_con)
-    df_comercio = aplicar_meta_y_calculos(base_con, key_prefix=f"con_{delegacion_sel}")
+    base_con = build_base_simple("Comercio", delegacion_sel, h_con, d_con, col_con)
+    df_comercio = apply_meta_calc(base_con, key_prefix=f"con_{delegacion_sel}")
     st.dataframe(df_comercio[["Tipo","Distrito","Meta","Contabilidad","% Avance","Pendiente"]], use_container_width=True)
 else:
     df_comercio = pd.DataFrame(columns=["Tipo","Distrito","Meta","Contabilidad","% Avance","Pendiente"])
-    st.warning("Falta CSV de Comercio o columna SI/NO.")
+    st.warning("Falta CSV o columna SI/NO en Comercio.")
 
 # Policial
 st.markdown("### Policial")
 if h_pol and d_pol and col_pol is not None:
-    base_pol = tabla_simple("Policial", delegacion_sel, h_pol, d_pol, col_pol)
-    df_policial = aplicar_meta_y_calculos(base_pol, key_prefix=f"pol_{delegacion_sel}")
+    base_pol = build_base_simple("Policial", delegacion_sel, h_pol, d_pol, col_pol)
+    df_policial = apply_meta_calc(base_pol, key_prefix=f"pol_{delegacion_sel}")
     st.dataframe(df_policial[["Tipo","Distrito","Meta","Contabilidad","% Avance","Pendiente"]], use_container_width=True)
 else:
     df_policial = pd.DataFrame(columns=["Tipo","Distrito","Meta","Contabilidad","% Avance","Pendiente"])
-    st.warning("Falta CSV de Policial o columna SI/NO.")
+    st.warning("Falta CSV o columna SI/NO en Policial.")
 
 st.divider()
 st.subheader("3) PDF")
@@ -455,4 +497,4 @@ if st.button("📄 Generar PDF"):
         mime="application/pdf"
     )
 
-st.caption("Listo: Contabilidad siempre es SI. La Meta es lo único manual.")
+st.caption("Listo: Contabilidad = SI. Meta es lo único manual.")
