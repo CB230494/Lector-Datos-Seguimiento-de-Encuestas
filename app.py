@@ -614,5 +614,6 @@ if st.button("📄 Generar PDF del reporte"):
         mime="application/pdf",
     )
 
-st.caption("Nota: Contabilidad = conteo de SI en la columna seleccionada. Metas y hora son manuales.")ta: Contabilidad sale del conteo de SI en la columna seleccionada (auto-detectada por defecto).")
+st.caption("Nota: Contabilidad = conteo de SI en la columna seleccionada. Metas y hora son manuales.")
+
 
