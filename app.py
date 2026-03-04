@@ -457,6 +457,12 @@ def build_pdf_bytes(delegacion_label: str, hora_reporte: str, fecha_str: str, lo
         story.append(Paragraph(f"<b>{title}</b>", styles["Heading2"]))
         story.append(Spacer(1, 4))
 
+        # ✅ NUEVO: si no hay base / no hay registros, mostrar texto por defecto (sin apartado extra)
+        if df is None or df.empty:
+            story.append(Paragraph("No hay registros porque aún no se contabilizan encuestas.", styles["Normal"]))
+            story.append(Spacer(1, 12))
+            return
+
         cols = ["Tipo", "Distrito", "Meta", "Contabilidad", "% Avance", "Pendiente"]
         data = [[Paragraph(c, head) for c in cols]]
 
@@ -692,4 +698,3 @@ if st.button("📄 Generar PDF"):
     )
 
 st.caption("Listo: Contabilidad = SI. Meta es lo único manual.")
-
