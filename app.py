@@ -376,26 +376,55 @@ def build_base_simple(tipo, lugar, header, data, col_yesno):
 
 
 def apply_meta_calc(df_base: pd.DataFrame, key_prefix: str) -> pd.DataFrame:
+    """
+    - Contabilidad inicia con el conteo automático de SI
+    - Meta y Contabilidad quedan editables
+    - % Avance y Pendiente se recalculan con lo editado
+    - SI/NO quedan como columnas informativas (no editables)
+    """
     df = df_base.copy()
-    df["Contabilidad"] = df["SI"]  # Contabilidad = SI
 
-    metas = []
-    for i, row in df.iterrows():
-        meta = st.number_input(
-            f"Meta {row['Tipo']} - {row['Distrito']}",
-            min_value=0,
-            value=0,
-            step=1,
-            key=f"{key_prefix}_meta_{i}"
-        )
-        metas.append(int(meta))
-    df["Meta"] = metas
+    # Contabilidad automática inicial = SI
+    df["Contabilidad"] = df["SI"].fillna(0).astype(int)
 
-    df["% Avance"] = df.apply(lambda r: (r["Contabilidad"] / r["Meta"]) if r["Meta"] > 0 else 0.0, axis=1)
-    df["Pendiente"] = df.apply(lambda r: max(int(r["Meta"]) - int(r["Contabilidad"]), 0), axis=1)
-    df["% Avance"] = df["% Avance"].apply(lambda x: f"{int(round(float(x) * 100))}%")
+    # Si no existe Meta, crearla
+    if "Meta" not in df.columns:
+        df["Meta"] = 0
 
-    return df[["Tipo", "Distrito", "Meta", "Contabilidad", "% Avance", "Pendiente", "SI", "NO"]]
+    # Editor SOLO para Meta y Contabilidad (editable)
+    editor_df = df[["Tipo", "Distrito", "Meta", "Contabilidad"]].copy()
+
+    edited = st.data_editor(
+        editor_df,
+        use_container_width=True,
+        num_rows="fixed",
+        key=f"{key_prefix}_editor",
+        column_config={
+            "Meta": st.column_config.NumberColumn("Meta", min_value=0, step=1),
+            "Contabilidad": st.column_config.NumberColumn("Contabilidad", min_value=0, step=1),
+        }
+    )
+
+    # Asegurar enteros
+    edited["Meta"] = edited["Meta"].fillna(0).astype(int)
+    edited["Contabilidad"] = edited["Contabilidad"].fillna(0).astype(int)
+
+    # Recalcular
+    edited["% Avance"] = edited.apply(
+        lambda r: (r["Contabilidad"] / r["Meta"]) if r["Meta"] > 0 else 0.0,
+        axis=1
+    )
+    edited["Pendiente"] = edited.apply(
+        lambda r: max(int(r["Meta"]) - int(r["Contabilidad"]), 0),
+        axis=1
+    )
+    edited["% Avance"] = edited["% Avance"].apply(lambda x: f"{int(round(float(x) * 100))}%")
+
+    # Reincorporar SI/NO informativos (no editables)
+    edited["SI"] = df["SI"].fillna(0).astype(int).values
+    edited["NO"] = df["NO"].fillna(0).astype(int).values
+
+    return edited[["Tipo", "Distrito", "Meta", "Contabilidad", "% Avance", "Pendiente", "SI", "NO"]]
 
 
 # -----------------------------
@@ -663,3 +692,4 @@ if st.button("📄 Generar PDF"):
     )
 
 st.caption("Listo: Contabilidad = SI. Meta es lo único manual.")
+
