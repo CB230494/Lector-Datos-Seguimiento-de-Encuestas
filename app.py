@@ -223,7 +223,7 @@ def choose_default_yesno_col(header: list[str], data: list[list[str]]) -> int:
 
 
 # =========================================================
-# ✅ NUEVO (2): ELIMINAR DUPLICADAS (≤ 5 minutos)
+# ✅ Deduplicación (≤ X minutos)
 # =========================================================
 def detect_datetime_col(header: list[str], data: list[list[str]]) -> int | None:
     """Devuelve el índice de la columna con más valores parseables como datetime."""
@@ -233,18 +233,15 @@ def detect_datetime_col(header: list[str], data: list[list[str]]) -> int | None:
     best_i = None
     best_hits = 0
 
-    # probamos todas las columnas con una muestra
     sample = data[:300]
     for j in range(len(header)):
         vals = [row[j] for row in sample if j < len(row)]
-        # parseo con pandas (acepta muchos formatos)
         dt = pd.to_datetime(pd.Series(vals), errors="coerce", infer_datetime_format=True)
         hits = int(dt.notna().sum())
         if hits > best_hits:
             best_hits = hits
             best_i = j
 
-    # umbral mínimo: al menos 5 timestamps parseables
     if best_hits >= 5:
         return best_i
     return None
@@ -260,18 +257,15 @@ def dedupe_within_minutes(header: list[str], data: list[list[str]], minutes: int
     if dt_col is None:
         return data, 0
 
-    # crear lista con dt parseado
     rows = []
     for idx, r in enumerate(data):
         raw_dt = r[dt_col] if dt_col < len(r) else ""
         dt = pd.to_datetime(raw_dt, errors="coerce", infer_datetime_format=True)
         rows.append((idx, dt.to_pydatetime() if pd.notna(dt) else None, r))
 
-    # separar validas e invalidas
     valid = [x for x in rows if x[1] is not None]
     invalid = [x for x in rows if x[1] is None]
 
-    # ordenar por datetime
     valid.sort(key=lambda x: x[1])
 
     last_time_by_sig = {}
@@ -288,7 +282,6 @@ def dedupe_within_minutes(header: list[str], data: list[list[str]], minutes: int
         last_time_by_sig[sig] = dt
         keep_indices.add(idx)
 
-    # invalidas se conservan (no se pueden comparar por tiempo)
     for idx, _, _ in invalid:
         keep_indices.add(idx)
 
@@ -297,33 +290,72 @@ def dedupe_within_minutes(header: list[str], data: list[list[str]], minutes: int
 
 
 # =========================================================
-# ✅ NUEVO (1): Agregar distritos faltantes (manual)
+# ✅ Catálogo de metas (Excel)
+# - Debe existir: catalogo_metas.xlsx (misma carpeta)
+# - Columnas: Delegacion | Tipo | Distrito | Meta
 # =========================================================
-def ensure_official_districts(df: pd.DataFrame, manual_districts: list[str]) -> pd.DataFrame:
+@st.cache_data
+def load_catalog(path: str = "catalogo_metas.xlsx") -> pd.DataFrame:
+    if not Path(path).exists():
+        return pd.DataFrame(columns=["Delegacion", "Tipo", "Distrito", "Meta"])
+
+    df = pd.read_excel(path)
+    # Normalización mínima
+    df["Delegacion"] = df["Delegacion"].astype(str).str.strip().apply(pretty_title)
+    df["Tipo"] = df["Tipo"].astype(str).str.strip().apply(pretty_title)
+    df["Distrito"] = df["Distrito"].astype(str).str.strip().apply(pretty_title)
+    df["Meta"] = pd.to_numeric(df["Meta"], errors="coerce").fillna(0).astype(int)
+
+    # Quitar filas vacías
+    df = df[df["Delegacion"].apply(norm) != ""]
+    df = df[df["Tipo"].apply(norm) != ""]
+    df = df[df["Distrito"].apply(norm) != ""]
+
+    return df.reset_index(drop=True)
+
+
+def get_catalog_df(catalogo: pd.DataFrame, delegacion: str, tipo: str) -> pd.DataFrame:
+    if catalogo is None or catalogo.empty:
+        return pd.DataFrame(columns=["Tipo", "Distrito", "Meta"])
+
+    d = pretty_title(delegacion)
+    t = pretty_title(tipo)
+
+    out = catalogo[(catalogo["Delegacion"] == d) & (catalogo["Tipo"] == t)].copy()
+    if out.empty:
+        return pd.DataFrame(columns=["Tipo", "Distrito", "Meta"])
+
+    return out[["Tipo", "Distrito", "Meta"]].sort_values("Distrito").reset_index(drop=True)
+
+
+def merge_base_with_catalog(df_base: pd.DataFrame, df_cat: pd.DataFrame, tipo: str) -> pd.DataFrame:
     """
-    Agrega al DF distritos que no estén presentes, con SI/NO=0.
-    df esperado: columnas Tipo, Distrito, SI, NO
+    Devuelve TODOS los distritos del catálogo (aunque CSV no traiga datos),
+    rellenando SI/NO con 0 si no aparecen.
+    df_base esperado: Tipo, Distrito, SI, NO
+    df_cat  esperado: Tipo, Distrito, Meta
     """
-    if df.empty:
-        return df
+    if df_base is None or df_base.empty:
+        df_base = pd.DataFrame(columns=["Distrito", "SI", "NO"])
+    else:
+        df_base = df_base.copy()
+        df_base["Distrito"] = df_base["Distrito"].apply(pretty_title)
 
-    existing = {pretty_title(x) for x in df["Distrito"].tolist()}
-    add_rows = []
-    tipo = df.iloc[0]["Tipo"]
+    if df_cat is None or df_cat.empty:
+        out = df_base.copy()
+        out["Tipo"] = pretty_title(tipo)
+        out["Meta"] = 0
+        out["SI"] = pd.to_numeric(out.get("SI", 0), errors="coerce").fillna(0).astype(int)
+        out["NO"] = pd.to_numeric(out.get("NO", 0), errors="coerce").fillna(0).astype(int)
+        return out[["Tipo", "Distrito", "Meta", "SI", "NO"]].sort_values("Distrito").reset_index(drop=True)
 
-    for d in manual_districts:
-        dd = pretty_title(d)
-        if norm(dd) == "":
-            continue
-        if dd not in existing:
-            add_rows.append({"Tipo": tipo, "Distrito": dd, "SI": 0, "NO": 0})
+    out = df_cat.merge(df_base[["Distrito", "SI", "NO"]], on="Distrito", how="left")
+    out["Tipo"] = pretty_title(tipo)
+    out["Meta"] = pd.to_numeric(out["Meta"], errors="coerce").fillna(0).astype(int)
+    out["SI"] = pd.to_numeric(out["SI"], errors="coerce").fillna(0).astype(int)
+    out["NO"] = pd.to_numeric(out["NO"], errors="coerce").fillna(0).astype(int)
 
-    if add_rows:
-        df = pd.concat([df, pd.DataFrame(add_rows)], ignore_index=True)
-
-    # ordenar por distrito
-    df = df.sort_values("Distrito").reset_index(drop=True)
-    return df
+    return out.sort_values("Distrito").reset_index(drop=True)
 
 
 # -----------------------------
@@ -362,69 +394,45 @@ def build_base_comunidad(header, data, col_yesno):
         "NO": [no_map[k] for k in si_map.keys()]
     }).sort_values("Distrito").reset_index(drop=True)
 
-    # filtro extra por seguridad
     df = df[~df["Distrito"].str.contains(r"\?", regex=True)]
     df = df[~df["Distrito"].str.contains(r"^\d+\.", regex=True)]
 
     return df
 
 
-def build_base_simple(tipo, lugar, header, data, col_yesno):
-    si = sum(1 for r in data if is_yes(r[col_yesno]))
-    no = sum(1 for r in data if is_no(r[col_yesno]))
-    return pd.DataFrame([{"Tipo": tipo, "Distrito": pretty_title(lugar), "SI": si, "NO": no}])
+def build_base_from_totals(tipo: str, distrito: str, si: int, no: int) -> pd.DataFrame:
+    return pd.DataFrame([{
+        "Tipo": pretty_title(tipo),
+        "Distrito": pretty_title(distrito),
+        "SI": int(si),
+        "NO": int(no)
+    }])
 
 
-def apply_meta_calc(df_base: pd.DataFrame, key_prefix: str) -> pd.DataFrame:
+def apply_meta_calc_auto(df_base: pd.DataFrame) -> pd.DataFrame:
     """
-    - Contabilidad inicia con el conteo automático de SI
-    - Meta y Contabilidad quedan editables
-    - % Avance y Pendiente se recalculan con lo editado
-    - SI/NO quedan como columnas informativas (no editables)
+    - Meta viene del catálogo (automática)
+    - Contabilidad = SI (automática)
+    - % Avance y Pendiente se calculan
     """
     df = df_base.copy()
+    df["Meta"] = pd.to_numeric(df.get("Meta", 0), errors="coerce").fillna(0).astype(int)
+    df["SI"] = pd.to_numeric(df.get("SI", 0), errors="coerce").fillna(0).astype(int)
+    df["NO"] = pd.to_numeric(df.get("NO", 0), errors="coerce").fillna(0).astype(int)
 
-    # Contabilidad automática inicial = SI
-    df["Contabilidad"] = df["SI"].fillna(0).astype(int)
+    df["Contabilidad"] = df["SI"].astype(int)
 
-    # Si no existe Meta, crearla
-    if "Meta" not in df.columns:
-        df["Meta"] = 0
-
-    # Editor SOLO para Meta y Contabilidad (editable)
-    editor_df = df[["Tipo", "Distrito", "Meta", "Contabilidad"]].copy()
-
-    edited = st.data_editor(
-        editor_df,
-        use_container_width=True,
-        num_rows="fixed",
-        key=f"{key_prefix}_editor",
-        column_config={
-            "Meta": st.column_config.NumberColumn("Meta", min_value=0, step=1),
-            "Contabilidad": st.column_config.NumberColumn("Contabilidad", min_value=0, step=1),
-        }
-    )
-
-    # Asegurar enteros
-    edited["Meta"] = edited["Meta"].fillna(0).astype(int)
-    edited["Contabilidad"] = edited["Contabilidad"].fillna(0).astype(int)
-
-    # Recalcular
-    edited["% Avance"] = edited.apply(
+    df["% Avance"] = df.apply(
         lambda r: (r["Contabilidad"] / r["Meta"]) if r["Meta"] > 0 else 0.0,
         axis=1
     )
-    edited["Pendiente"] = edited.apply(
+    df["Pendiente"] = df.apply(
         lambda r: max(int(r["Meta"]) - int(r["Contabilidad"]), 0),
         axis=1
     )
-    edited["% Avance"] = edited["% Avance"].apply(lambda x: f"{int(round(float(x) * 100))}%")
+    df["% Avance"] = df["% Avance"].apply(lambda x: f"{int(round(float(x) * 100))}%")
 
-    # Reincorporar SI/NO informativos (no editables)
-    edited["SI"] = df["SI"].fillna(0).astype(int).values
-    edited["NO"] = df["NO"].fillna(0).astype(int).values
-
-    return edited[["Tipo", "Distrito", "Meta", "Contabilidad", "% Avance", "Pendiente", "SI", "NO"]]
+    return df[["Tipo", "Distrito", "Meta", "Contabilidad", "% Avance", "Pendiente", "SI", "NO"]]
 
 
 # -----------------------------
@@ -457,9 +465,8 @@ def build_pdf_bytes(delegacion_label: str, hora_reporte: str, fecha_str: str, lo
         story.append(Paragraph(f"<b>{title}</b>", styles["Heading2"]))
         story.append(Spacer(1, 4))
 
-        # ✅ NUEVO: si no hay base / no hay registros, mostrar texto por defecto (sin apartado extra)
         if df is None or df.empty:
-            story.append(Paragraph("No hay registros porque aún no se contabilizan encuestas.", styles["Normal"]))
+            story.append(Paragraph("No hay registros.", styles["Normal"]))
             story.append(Spacer(1, 12))
             return
 
@@ -503,7 +510,15 @@ def build_pdf_bytes(delegacion_label: str, hora_reporte: str, fecha_str: str, lo
 # UI
 # -----------------------------
 st.title("📄 Reporte por Delegación (Comunidad / Comercio / Policial)")
-st.caption("Primero ubicamos SI/NO. Luego ingresás Meta (manual) para calcular Avance y Pendiente.")
+st.caption("Metas y distritos salen automáticos desde el catálogo. Contabilidad = SI (automático).")
+
+# ✅ Cargar catálogo
+CAT_PATH = "catalogo_metas.xlsx"
+catalogo = load_catalog(CAT_PATH)
+
+if catalogo.empty:
+    st.error(f"No encontré el catálogo '{CAT_PATH}'. Colocalo en la misma carpeta que este app.py.")
+    st.stop()
 
 files = st.file_uploader("Cargá los CSV (pueden ser varios)", type=["csv"], accept_multiple_files=True)
 if not files:
@@ -526,11 +541,13 @@ hora_reporte = st.text_input("Hora del reporte:", value="")
 fecha_str = fecha_es(datetime.now())
 delegacion_label = f"Delegación: {pretty_title(delegacion_sel)}"
 
+
 def pick(tipo_needed: str):
     for (fname, tipo, lugar, header, data) in parsed:
         if lugar == delegacion_sel and tipo.lower() == tipo_needed.lower():
             return fname, header, data
     return None, None, None
+
 
 fname_com, h_com, d_com = pick("Comunidad")
 fname_con, h_con, d_con = pick("Comercio")
@@ -538,7 +555,7 @@ fname_pol, h_pol, d_pol = pick("Policial")
 
 
 # =========================================================
-# ✅ NUEVO (2): toggles deduplicación por tipo
+# ✅ Filtros opcionales (deduplicación por tipo)
 # =========================================================
 st.divider()
 st.subheader("0) Filtros opcionales")
@@ -568,37 +585,14 @@ if any(v > 0 for v in removed_info.values()):
 
 
 # =========================================================
-# ✅ NUEVO (1): distritos faltantes manuales (solo Comunidad)
+# 1) Ubicar los SI/NO (antes de cálculos)
 # =========================================================
 st.divider()
-st.subheader("1) Distritos oficiales (opcional) - solo Comunidad")
-st.caption("Si falta un distrito (porque no hubo respuestas), agregalo aquí y quedará con 0.")
-
-manual_districts = []
-if delegacion_sel:
-    key_off = f"off_districts_{delegacion_sel}"
-    if key_off not in st.session_state:
-        st.session_state[key_off] = pd.DataFrame({"Distrito": []})
-
-    edited_off = st.data_editor(
-        st.session_state[key_off],
-        num_rows="dynamic",
-        use_container_width=True,
-        key=f"edit_off_{delegacion_sel}"
-    )
-    st.session_state[key_off] = edited_off
-    manual_districts = [str(x).strip() for x in edited_off.get("Distrito", []).tolist() if norm(x) != ""]
-
-
-# =========================================================
-# 2) Ubicar los SI/NO (antes de metas)
-# =========================================================
-st.divider()
-st.subheader("2) ✅ Ubicar los SI/NO (antes de metas)")
+st.subheader("1) ✅ Ubicar los SI/NO (antes del reporte)")
 
 def ui_pick_yesno(tipo_label: str, header, data):
     if not header:
-        st.info(f"No hay CSV de {tipo_label} para esta delegación.")
+        st.info(f"No hay CSV de {tipo_label} para esta delegación. Se usará SI=0, NO=0.")
         return None
 
     ranked = rank_yesno_columns(header, data, top_k=8)
@@ -626,6 +620,7 @@ def ui_pick_yesno(tipo_label: str, header, data):
 
     return col
 
+
 col_com = ui_pick_yesno("Comunidad", h_com, d_com) if h_com else None
 st.divider()
 col_con = ui_pick_yesno("Comercio", h_con, d_con) if h_con else None
@@ -634,51 +629,77 @@ col_pol = ui_pick_yesno("Policial", h_pol, d_pol) if h_pol else None
 
 
 # =========================================================
-# 3) Metas manuales → % Avance y Pendiente
+# 2) Reporte automático (Metas + Distritos desde catálogo)
 # =========================================================
 st.divider()
-st.subheader("3) Metas (manual) → % Avance y Pendiente")
+st.subheader("2) Reporte (automático)")
 
-# Comunidad
+# -----------------------------
+# Comunidad (por distrito real)
+# -----------------------------
 st.markdown("### Comunidad")
+df_cat_com = get_catalog_df(catalogo, delegacion_sel, "Comunidad")
+
 if h_com and d_com and col_com is not None:
-    base_com = build_base_comunidad(h_com, d_com, col_com)
-
-    # ✅ NUEVO: agregar distritos faltantes manuales con 0
-    base_com = ensure_official_districts(base_com, manual_districts)
-
-    df_comunidad = apply_meta_calc(base_com, key_prefix=f"com_{delegacion_sel}")
-    st.dataframe(df_comunidad[["Tipo","Distrito","Meta","Contabilidad","% Avance","Pendiente"]], use_container_width=True)
+    base_com = build_base_comunidad(h_com, d_com, col_com)  # Tipo, Distrito, SI, NO
 else:
-    df_comunidad = pd.DataFrame(columns=["Tipo","Distrito","Meta","Contabilidad","% Avance","Pendiente"])
-    st.warning("Falta CSV o columna SI/NO en Comunidad.")
+    base_com = pd.DataFrame(columns=["Tipo", "Distrito", "SI", "NO"])
 
-# Comercio
+base_com = merge_base_with_catalog(base_com, df_cat_com, "Comunidad")
+df_comunidad = apply_meta_calc_auto(base_com)
+st.dataframe(df_comunidad[["Tipo","Distrito","Meta","Contabilidad","% Avance","Pendiente"]], use_container_width=True)
+
+# -----------------------------
+# Comercio (1 fila desde catálogo)
+# -----------------------------
 st.markdown("### Comercio")
-if h_con and d_con and col_con is not None:
-    base_con = build_base_simple("Comercio", delegacion_sel, h_con, d_con, col_con)
-    df_comercio = apply_meta_calc(base_con, key_prefix=f"con_{delegacion_sel}")
-    st.dataframe(df_comercio[["Tipo","Distrito","Meta","Contabilidad","% Avance","Pendiente"]], use_container_width=True)
-else:
-    df_comercio = pd.DataFrame(columns=["Tipo","Distrito","Meta","Contabilidad","% Avance","Pendiente"])
-    st.warning("Falta CSV o columna SI/NO en Comercio.")
+df_cat_con = get_catalog_df(catalogo, delegacion_sel, "Comercio")
 
-# Policial
-st.markdown("### Policial")
-if h_pol and d_pol and col_pol is not None:
-    base_pol = build_base_simple("Policial", delegacion_sel, h_pol, d_pol, col_pol)
-    df_policial = apply_meta_calc(base_pol, key_prefix=f"pol_{delegacion_sel}")
-    st.dataframe(df_policial[["Tipo","Distrito","Meta","Contabilidad","% Avance","Pendiente"]], use_container_width=True)
+si_con = 0
+no_con = 0
+if h_con and d_con and col_con is not None:
+    si_con = sum(1 for r in d_con if is_yes(r[col_con]))
+    no_con = sum(1 for r in d_con if is_no(r[col_con]))
+
+# si el catálogo tiene fila(s), usamos su primer distrito como “etiqueta”
+if not df_cat_con.empty:
+    distrito_con = df_cat_con.iloc[0]["Distrito"]
 else:
-    df_policial = pd.DataFrame(columns=["Tipo","Distrito","Meta","Contabilidad","% Avance","Pendiente"])
-    st.warning("Falta CSV o columna SI/NO en Policial.")
+    distrito_con = delegacion_sel
+
+base_con = build_base_from_totals("Comercio", distrito_con, si_con, no_con)
+base_con = merge_base_with_catalog(base_con, df_cat_con, "Comercio")
+df_comercio = apply_meta_calc_auto(base_con)
+st.dataframe(df_comercio[["Tipo","Distrito","Meta","Contabilidad","% Avance","Pendiente"]], use_container_width=True)
+
+# -----------------------------
+# Policial (1 fila desde catálogo)
+# -----------------------------
+st.markdown("### Policial")
+df_cat_pol = get_catalog_df(catalogo, delegacion_sel, "Policial")
+
+si_pol = 0
+no_pol = 0
+if h_pol and d_pol and col_pol is not None:
+    si_pol = sum(1 for r in d_pol if is_yes(r[col_pol]))
+    no_pol = sum(1 for r in d_pol if is_no(r[col_pol]))
+
+if not df_cat_pol.empty:
+    distrito_pol = df_cat_pol.iloc[0]["Distrito"]
+else:
+    distrito_pol = delegacion_sel
+
+base_pol = build_base_from_totals("Policial", distrito_pol, si_pol, no_pol)
+base_pol = merge_base_with_catalog(base_pol, df_cat_pol, "Policial")
+df_policial = apply_meta_calc_auto(base_pol)
+st.dataframe(df_policial[["Tipo","Distrito","Meta","Contabilidad","% Avance","Pendiente"]], use_container_width=True)
 
 
 # =========================================================
-# 4) PDF
+# 3) PDF
 # =========================================================
 st.divider()
-st.subheader("4) PDF")
+st.subheader("3) PDF")
 
 if st.button("📄 Generar PDF"):
     pdf = build_pdf_bytes(
@@ -697,4 +718,4 @@ if st.button("📄 Generar PDF"):
         mime="application/pdf"
     )
 
-st.caption("Listo: Contabilidad = SI. Meta es lo único manual.")
+st.caption("Listo: distritos + metas vienen del catálogo. Contabilidad = SI (automático).")
