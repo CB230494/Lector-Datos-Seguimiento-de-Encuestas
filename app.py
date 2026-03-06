@@ -442,6 +442,10 @@ def editable_report_table(df: pd.DataFrame, key: str) -> pd.DataFrame:
     """
     Permite editar directamente los recuadros visibles del reporte.
     Mantiene SI y NO internos sin mostrarlos.
+    Si se modifica Meta o Contabilidad, recalcula automáticamente:
+    - % Avance
+    - Pendiente
+    También sincroniza SI = Contabilidad para mantener consistencia interna.
     """
     if df is None or df.empty:
         return df
@@ -463,17 +467,25 @@ def editable_report_table(df: pd.DataFrame, key: str) -> pd.DataFrame:
     edited["Distrito"] = edited["Distrito"].astype(str)
     edited["Meta"] = pd.to_numeric(edited["Meta"], errors="coerce").fillna(0).astype(int)
     edited["Contabilidad"] = pd.to_numeric(edited["Contabilidad"], errors="coerce").fillna(0).astype(int)
-    edited["Pendiente"] = pd.to_numeric(edited["Pendiente"], errors="coerce").fillna(0).astype(int)
-    edited["% Avance"] = edited["% Avance"].astype(str)
 
-    # Reincorporar columnas internas para que el PDF siga funcionando sin romper nada
-    if "SI" in df.columns:
-        edited["SI"] = df["SI"].values
-    else:
-        edited["SI"] = 0
+    # Recalcular automáticamente
+    edited["Pendiente"] = edited.apply(
+        lambda r: max(int(r["Meta"]) - int(r["Contabilidad"]), 0),
+        axis=1
+    )
+
+    edited["% Avance"] = edited.apply(
+        lambda r: f"{int(round((r['Contabilidad'] / r['Meta']) * 100))}%"
+        if int(r["Meta"]) > 0 else "0%",
+        axis=1
+    )
+
+    # Reincorporar columnas internas
+    # SI se sincroniza con Contabilidad para que todo quede consistente
+    edited["SI"] = edited["Contabilidad"].astype(int)
 
     if "NO" in df.columns:
-        edited["NO"] = df["NO"].values
+        edited["NO"] = pd.to_numeric(df["NO"], errors="coerce").fillna(0).astype(int).values
     else:
         edited["NO"] = 0
 
@@ -644,7 +656,7 @@ def ui_pick_yesno(tipo_label: str, header, data):
     default_idx = choose_default_yesno_col(header, data)
 
     st.markdown(f"**{tipo_label}:** columnas candidatas (top 8)")
-    st.dataframe(ranked[["idx","columna","SI","NO","SI+NO","ratio_SI_NO"]], use_container_width=True)
+    st.dataframe(ranked[["idx", "columna", "SI", "NO", "SI+NO", "ratio_SI_NO"]], use_container_width=True)
 
     labels = [f"[{i+1}] {header[i]}" for i in range(len(header))]
     choice = st.selectbox(
@@ -706,7 +718,6 @@ if h_con and d_con and col_con is not None:
     si_con = sum(1 for r in d_con if is_yes(r[col_con]))
     no_con = sum(1 for r in d_con if is_no(r[col_con]))
 
-# si el catálogo tiene fila(s), usamos su primer distrito como “etiqueta”
 if not df_cat_con.empty:
     distrito_con = df_cat_con.iloc[0]["Distrito"]
 else:
@@ -763,5 +774,4 @@ if st.button("📄 Generar PDF"):
         mime="application/pdf"
     )
 
-st.caption("Listo: distritos + metas vienen del catálogo. Contabilidad = SI (automático).")
-
+st.caption("Listo: distritos + metas vienen del catálogo. Si editás Meta o Contabilidad, ahora % Avance y Pendiente se recalculan automáticamente.")
