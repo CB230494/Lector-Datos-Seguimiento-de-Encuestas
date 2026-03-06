@@ -436,6 +436,51 @@ def apply_meta_calc_auto(df_base: pd.DataFrame) -> pd.DataFrame:
 
 
 # -----------------------------
+# NUEVO: editor de tablas del reporte
+# -----------------------------
+def editable_report_table(df: pd.DataFrame, key: str) -> pd.DataFrame:
+    """
+    Permite editar directamente los recuadros visibles del reporte.
+    Mantiene SI y NO internos sin mostrarlos.
+    """
+    if df is None or df.empty:
+        return df
+
+    df = df.copy()
+
+    visibles = ["Tipo", "Distrito", "Meta", "Contabilidad", "% Avance", "Pendiente"]
+    editor_df = df[visibles].copy()
+
+    edited = st.data_editor(
+        editor_df,
+        use_container_width=True,
+        num_rows="fixed",
+        key=key
+    )
+
+    # Normalizar tipos
+    edited["Tipo"] = edited["Tipo"].astype(str)
+    edited["Distrito"] = edited["Distrito"].astype(str)
+    edited["Meta"] = pd.to_numeric(edited["Meta"], errors="coerce").fillna(0).astype(int)
+    edited["Contabilidad"] = pd.to_numeric(edited["Contabilidad"], errors="coerce").fillna(0).astype(int)
+    edited["Pendiente"] = pd.to_numeric(edited["Pendiente"], errors="coerce").fillna(0).astype(int)
+    edited["% Avance"] = edited["% Avance"].astype(str)
+
+    # Reincorporar columnas internas para que el PDF siga funcionando sin romper nada
+    if "SI" in df.columns:
+        edited["SI"] = df["SI"].values
+    else:
+        edited["SI"] = 0
+
+    if "NO" in df.columns:
+        edited["NO"] = df["NO"].values
+    else:
+        edited["NO"] = 0
+
+    return edited[["Tipo", "Distrito", "Meta", "Contabilidad", "% Avance", "Pendiente", "SI", "NO"]]
+
+
+# -----------------------------
 # PDF
 # -----------------------------
 def build_pdf_bytes(delegacion_label: str, hora_reporte: str, fecha_str: str, logo_path: str | None,
@@ -477,10 +522,10 @@ def build_pdf_bytes(delegacion_label: str, hora_reporte: str, fecha_str: str, lo
             data.append([
                 Paragraph(str(r["Tipo"]), cell),
                 Paragraph(str(r["Distrito"]), cell),
-                Paragraph(str(int(r["Meta"])), cell),
-                Paragraph(str(int(r["Contabilidad"])), cell),
+                Paragraph(str(int(pd.to_numeric(r["Meta"], errors="coerce"))), cell),
+                Paragraph(str(int(pd.to_numeric(r["Contabilidad"], errors="coerce"))), cell),
                 Paragraph(str(r["% Avance"]), cell),
-                Paragraph(str(int(r["Pendiente"])), cell),
+                Paragraph(str(int(pd.to_numeric(r["Pendiente"], errors="coerce"))), cell),
             ])
 
         tbl = Table(data, colWidths=[62, 210, 55, 78, 58, 62])
@@ -647,7 +692,7 @@ else:
 
 base_com = merge_base_with_catalog(base_com, df_cat_com, "Comunidad")
 df_comunidad = apply_meta_calc_auto(base_com)
-st.dataframe(df_comunidad[["Tipo","Distrito","Meta","Contabilidad","% Avance","Pendiente"]], use_container_width=True)
+df_comunidad = editable_report_table(df_comunidad, key=f"editor_comunidad_{delegacion_sel}")
 
 # -----------------------------
 # Comercio (1 fila desde catálogo)
@@ -670,7 +715,7 @@ else:
 base_con = build_base_from_totals("Comercio", distrito_con, si_con, no_con)
 base_con = merge_base_with_catalog(base_con, df_cat_con, "Comercio")
 df_comercio = apply_meta_calc_auto(base_con)
-st.dataframe(df_comercio[["Tipo","Distrito","Meta","Contabilidad","% Avance","Pendiente"]], use_container_width=True)
+df_comercio = editable_report_table(df_comercio, key=f"editor_comercio_{delegacion_sel}")
 
 # -----------------------------
 # Policial (1 fila desde catálogo)
@@ -692,7 +737,7 @@ else:
 base_pol = build_base_from_totals("Policial", distrito_pol, si_pol, no_pol)
 base_pol = merge_base_with_catalog(base_pol, df_cat_pol, "Policial")
 df_policial = apply_meta_calc_auto(base_pol)
-st.dataframe(df_policial[["Tipo","Distrito","Meta","Contabilidad","% Avance","Pendiente"]], use_container_width=True)
+df_policial = editable_report_table(df_policial, key=f"editor_policial_{delegacion_sel}")
 
 
 # =========================================================
@@ -719,3 +764,4 @@ if st.button("📄 Generar PDF"):
     )
 
 st.caption("Listo: distritos + metas vienen del catálogo. Contabilidad = SI (automático).")
+
