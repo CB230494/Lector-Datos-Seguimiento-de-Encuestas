@@ -435,53 +435,49 @@ def apply_meta_calc_auto(df_base: pd.DataFrame) -> pd.DataFrame:
     return df[["Tipo", "Distrito", "Meta", "Contabilidad", "% Avance", "Pendiente", "SI", "NO"]]
 
 
-# -----------------------------
-# NUEVO: editor de tablas del reporte
-# -----------------------------
 def editable_report_table(df: pd.DataFrame, key: str) -> pd.DataFrame:
     """
     Permite editar directamente los recuadros visibles del reporte.
-    Mantiene SI y NO internos sin mostrarlos.
-    Si se modifica Meta o Contabilidad, recalcula automáticamente:
-    - % Avance
-    - Pendiente
-    También sincroniza SI = Contabilidad para mantener consistencia interna.
+    Recalcula automáticamente % Avance y Pendiente cuando se modifica
+    Meta o Contabilidad.
     """
     if df is None or df.empty:
         return df
 
     df = df.copy()
 
-    visibles = ["Tipo", "Distrito", "Meta", "Contabilidad", "% Avance", "Pendiente"]
-    editor_df = df[visibles].copy()
+    # Solo estas columnas se editan
+    editor_df = df[["Tipo", "Distrito", "Meta", "Contabilidad"]].copy()
 
     edited = st.data_editor(
         editor_df,
         use_container_width=True,
         num_rows="fixed",
-        key=key
+        key=key,
+        column_config={
+            "Tipo": st.column_config.TextColumn("Tipo"),
+            "Distrito": st.column_config.TextColumn("Distrito"),
+            "Meta": st.column_config.NumberColumn("Meta", min_value=0, step=1),
+            "Contabilidad": st.column_config.NumberColumn("Contabilidad", min_value=0, step=1),
+        },
+        disabled=[]
     )
 
-    # Normalizar tipos
+    # Normalizar
     edited["Tipo"] = edited["Tipo"].astype(str)
     edited["Distrito"] = edited["Distrito"].astype(str)
     edited["Meta"] = pd.to_numeric(edited["Meta"], errors="coerce").fillna(0).astype(int)
     edited["Contabilidad"] = pd.to_numeric(edited["Contabilidad"], errors="coerce").fillna(0).astype(int)
 
     # Recalcular automáticamente
-    edited["Pendiente"] = edited.apply(
-        lambda r: max(int(r["Meta"]) - int(r["Contabilidad"]), 0),
-        axis=1
-    )
-
+    edited["Pendiente"] = (edited["Meta"] - edited["Contabilidad"]).clip(lower=0).astype(int)
     edited["% Avance"] = edited.apply(
-        lambda r: f"{int(round((r['Contabilidad'] / r['Meta']) * 100))}%"
-        if int(r["Meta"]) > 0 else "0%",
+        lambda r: f"{round((r['Contabilidad'] / r['Meta']) * 100):.0f}%"
+        if r["Meta"] > 0 else "0%",
         axis=1
     )
 
-    # Reincorporar columnas internas
-    # SI se sincroniza con Contabilidad para que todo quede consistente
+    # Columnas internas
     edited["SI"] = edited["Contabilidad"].astype(int)
 
     if "NO" in df.columns:
@@ -489,9 +485,13 @@ def editable_report_table(df: pd.DataFrame, key: str) -> pd.DataFrame:
     else:
         edited["NO"] = 0
 
+    # Mostrar resultado recalculado abajo
+    st.dataframe(
+        edited[["Tipo", "Distrito", "Meta", "Contabilidad", "% Avance", "Pendiente"]],
+        use_container_width=True
+    )
+
     return edited[["Tipo", "Distrito", "Meta", "Contabilidad", "% Avance", "Pendiente", "SI", "NO"]]
-
-
 # -----------------------------
 # PDF
 # -----------------------------
@@ -775,3 +775,4 @@ if st.button("📄 Generar PDF"):
     )
 
 st.caption("Listo: distritos + metas vienen del catálogo. Si editás Meta o Contabilidad, ahora % Avance y Pendiente se recalculan automáticamente.")
+
