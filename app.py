@@ -64,6 +64,52 @@ def pretty_title(s: str) -> str:
 
 
 # -----------------------------
+# Normalización ROBUSTA de lugar/distrito
+# -----------------------------
+def normalize_place_key(v) -> str:
+    """
+    Clave robusta para comparar distritos/delegaciones sin romper el texto visible.
+    Soporta:
+    - tildes
+    - dobles espacios
+    - saltos de línea
+    - texto extra después de coma / guion / slash
+    - variantes conocidas (ej. Uruca / La Uruca)
+    """
+    if v is None:
+        return ""
+
+    s = str(v).strip().strip("\ufeff")
+    s = s.replace("\n", " ").replace("\r", " ").strip()
+    s = re.sub(r"\s+", " ", s)
+
+    # Normal base
+    s = strip_accents(s).lower().strip()
+
+    # Quitar textos complementarios comunes:
+    # "Pará, Santo Domingo" -> "para"
+    # "San José de la Montaña - Barva" -> "san jose de la montana"
+    # "La Ribera / Belén" -> "la ribera"
+    s = re.split(r"\s*[,;/\-]\s*", s)[0].strip()
+
+    # Limpiar artículos/ruido inicial o final
+    s = re.sub(r"\s+", " ", s).strip(" .,:;-/")
+
+    # Homologaciones conocidas para no romper casos ya corregidos
+    alias_map = {
+        "la uruca": "uruca",
+        "uruca": "uruca",
+        "zapote": "zapote",
+        "san jose de la montana": "san jose de la montana",
+        "para": "para",
+        "la ribera": "la ribera",
+        "ribera": "la ribera",
+    }
+
+    return alias_map.get(s, s)
+
+
+# -----------------------------
 # Fecha en español
 # -----------------------------
 SPANISH_WEEKDAYS = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
@@ -153,7 +199,7 @@ def find_district_col(header: list[str], data: list[list[str]]):
                 continue
             if "?" in vv or ":" in vv:
                 continue
-            if len(vv) > 35:
+            if len(vv) > 60:
                 continue
             if re.match(r"^\d+\s*[\.\)]", vv):
                 continue
@@ -297,7 +343,7 @@ def dedupe_within_minutes(header: list[str], data: list[list[str]], minutes: int
 @st.cache_data
 def load_catalog(path: str = "catalogo_metas.xlsx") -> pd.DataFrame:
     if not Path(path).exists():
-        return pd.DataFrame(columns=["Delegacion", "Tipo", "Distrito", "Meta"])
+        return pd.DataFrame(columns=["Delegacion", "Tipo", "Distrito", "Meta", "Distrito_key"])
 
     df = pd.read_excel(path)
 
@@ -310,29 +356,32 @@ def load_catalog(path: str = "catalogo_metas.xlsx") -> pd.DataFrame:
     df = df[df["Tipo"].apply(norm) != ""]
     df = df[df["Distrito"].apply(norm) != ""]
 
+    df["Distrito_key"] = df["Distrito"].apply(normalize_place_key)
+
     return df.reset_index(drop=True)
 
 
 def get_catalog_df(catalogo: pd.DataFrame, delegacion: str, tipo: str) -> pd.DataFrame:
     if catalogo is None or catalogo.empty:
-        return pd.DataFrame(columns=["Tipo", "Distrito", "Meta"])
+        return pd.DataFrame(columns=["Tipo", "Distrito", "Meta", "Distrito_key"])
 
     d = pretty_title(delegacion)
     t = pretty_title(tipo)
 
     out = catalogo[(catalogo["Delegacion"] == d) & (catalogo["Tipo"] == t)].copy()
     if out.empty:
-        return pd.DataFrame(columns=["Tipo", "Distrito", "Meta"])
+        return pd.DataFrame(columns=["Tipo", "Distrito", "Meta", "Distrito_key"])
 
-    return out[["Tipo", "Distrito", "Meta"]].sort_values("Distrito").reset_index(drop=True)
+    return out[["Tipo", "Distrito", "Meta", "Distrito_key"]].sort_values("Distrito").reset_index(drop=True)
 
 
 def merge_base_with_catalog(df_base: pd.DataFrame, df_cat: pd.DataFrame, tipo: str) -> pd.DataFrame:
     if df_base is None or df_base.empty:
-        df_base = pd.DataFrame(columns=["Distrito", "SI", "NO"])
+        df_base = pd.DataFrame(columns=["Distrito", "SI", "NO", "Distrito_key"])
     else:
         df_base = df_base.copy()
         df_base["Distrito"] = df_base["Distrito"].apply(pretty_title)
+        df_base["Distrito_key"] = df_base["Distrito"].apply(normalize_place_key)
 
     if df_cat is None or df_cat.empty:
         out = df_base.copy()
@@ -340,15 +389,30 @@ def merge_base_with_catalog(df_base: pd.DataFrame, df_cat: pd.DataFrame, tipo: s
         out["Meta"] = 0
         out["SI"] = pd.to_numeric(out.get("SI", 0), errors="coerce").fillna(0).astype(int)
         out["NO"] = pd.to_numeric(out.get("NO", 0), errors="coerce").fillna(0).astype(int)
-        return out[["Tipo", "Distrito", "Meta", "SI", "NO"]].sort_values("Distrito").reset_index(drop=True)
+        if "Distrito_key" not in out.columns:
+            out["Distrito_key"] = out["Distrito"].apply(normalize_place_key)
+        return out[["Tipo", "Distrito", "Meta", "SI", "NO", "Distrito_key"]].sort_values("Distrito").reset_index(drop=True)
 
-    out = df_cat.merge(df_base[["Distrito", "SI", "NO"]], on="Distrito", how="left")
+    cat = df_cat.copy()
+    if "Distrito_key" not in cat.columns:
+        cat["Distrito_key"] = cat["Distrito"].apply(normalize_place_key)
+
+    base_agg = (
+        df_base.groupby("Distrito_key", as_index=False)
+        .agg({
+            "Distrito": "first",
+            "SI": "sum",
+            "NO": "sum"
+        })
+    )
+
+    out = cat.merge(base_agg[["Distrito_key", "SI", "NO"]], on="Distrito_key", how="left")
     out["Tipo"] = pretty_title(tipo)
     out["Meta"] = pd.to_numeric(out["Meta"], errors="coerce").fillna(0).astype(int)
     out["SI"] = pd.to_numeric(out["SI"], errors="coerce").fillna(0).astype(int)
     out["NO"] = pd.to_numeric(out["NO"], errors="coerce").fillna(0).astype(int)
 
-    return out.sort_values("Distrito").reset_index(drop=True)
+    return out[["Tipo", "Distrito", "Meta", "SI", "NO", "Distrito_key"]].sort_values("Distrito").reset_index(drop=True)
 
 
 # -----------------------------
@@ -360,36 +424,52 @@ def build_base_comunidad(header, data, col_yesno):
     if dist_col is None:
         si = sum(1 for r in data if is_yes(r[col_yesno]))
         no = sum(1 for r in data if is_no(r[col_yesno]))
-        return pd.DataFrame([{"Tipo": "Comunidad", "Distrito": "TOTAL (Delegación)", "SI": si, "NO": no}])
+        return pd.DataFrame([{
+            "Tipo": "Comunidad",
+            "Distrito": "TOTAL (Delegación)",
+            "Distrito_key": normalize_place_key("TOTAL (Delegación)"),
+            "SI": si,
+            "NO": no
+        }])
 
-    distritos_raw = get_unique_values(data, dist_col)
-
-    si_map = {pretty_title(d): 0 for d in distritos_raw}
-    no_map = {pretty_title(d): 0 for d in distritos_raw}
+    acc = {}
 
     for r in data:
-        d = pretty_title(r[dist_col])
-        if norm(d) == "":
+        raw_d = r[dist_col] if dist_col < len(r) else ""
+        d_show = pretty_title(raw_d)
+        d_key = normalize_place_key(raw_d)
+
+        if d_key == "":
             continue
-        if d not in si_map:
-            si_map[d] = 0
-            no_map[d] = 0
+
+        if "?" in str(raw_d):
+            continue
+        if re.match(r"^\d+\.", str(raw_d).strip()):
+            continue
+
+        if d_key not in acc:
+            acc[d_key] = {"Distrito": d_show, "SI": 0, "NO": 0}
 
         if is_yes(r[col_yesno]):
-            si_map[d] += 1
+            acc[d_key]["SI"] += 1
         elif is_no(r[col_yesno]):
-            no_map[d] += 1
+            acc[d_key]["NO"] += 1
 
-    df = pd.DataFrame({
-        "Tipo": "Comunidad",
-        "Distrito": list(si_map.keys()),
-        "SI": list(si_map.values()),
-        "NO": [no_map[k] for k in si_map.keys()]
-    }).sort_values("Distrito").reset_index(drop=True)
+    rows = []
+    for k, v in acc.items():
+        rows.append({
+            "Tipo": "Comunidad",
+            "Distrito": v["Distrito"],
+            "Distrito_key": k,
+            "SI": v["SI"],
+            "NO": v["NO"]
+        })
 
-    df = df[~df["Distrito"].str.contains(r"\?", regex=True)]
-    df = df[~df["Distrito"].str.contains(r"^\d+\.", regex=True)]
+    df = pd.DataFrame(rows)
+    if df.empty:
+        return pd.DataFrame(columns=["Tipo", "Distrito", "Distrito_key", "SI", "NO"])
 
+    df = df.sort_values("Distrito").reset_index(drop=True)
     return df
 
 
@@ -397,6 +477,7 @@ def build_base_from_totals(tipo: str, distrito: str, si: int, no: int) -> pd.Dat
     return pd.DataFrame([{
         "Tipo": pretty_title(tipo),
         "Distrito": pretty_title(distrito),
+        "Distrito_key": normalize_place_key(distrito),
         "SI": int(si),
         "NO": int(no)
     }])
@@ -420,7 +501,11 @@ def apply_meta_calc_auto(df_base: pd.DataFrame) -> pd.DataFrame:
     )
     df["% Avance"] = df["% Avance"].apply(lambda x: f"{int(round(float(x) * 100))}%")
 
-    return df[["Tipo", "Distrito", "Meta", "Contabilidad", "% Avance", "Pendiente", "SI", "NO"]]
+    keep_cols = ["Tipo", "Distrito", "Meta", "Contabilidad", "% Avance", "Pendiente", "SI", "NO"]
+    if "Distrito_key" in df.columns:
+        keep_cols.append("Distrito_key")
+
+    return df[keep_cols]
 
 
 # -----------------------------
@@ -437,11 +522,15 @@ def editable_report_table(df: pd.DataFrame, key: str, place_label: str = "Distri
 
     df = df.copy()
 
-    editor_df = df[["Tipo", "Distrito", "Meta", "Contabilidad"]].copy()
+    extra_cols = []
+    if "Distrito_key" in df.columns:
+        extra_cols.append("Distrito_key")
+
+    editor_df = df[["Tipo", "Distrito", "Meta", "Contabilidad"] + extra_cols].copy()
     editor_df = editor_df.rename(columns={"Distrito": place_label})
 
     edited = st.data_editor(
-        editor_df,
+        editor_df[["Tipo", place_label, "Meta", "Contabilidad"]],
         use_container_width=True,
         num_rows="fixed",
         key=key,
@@ -475,12 +564,17 @@ def editable_report_table(df: pd.DataFrame, key: str, place_label: str = "Distri
     else:
         edited["NO"] = 0
 
+    if "Distrito_key" in df.columns:
+        edited["Distrito_key"] = df["Distrito_key"].values
+    else:
+        edited["Distrito_key"] = edited["Distrito"].apply(normalize_place_key)
+
     show_df = edited[["Tipo", "Distrito", "Meta", "Contabilidad", "% Avance", "Pendiente"]].copy()
     show_df = show_df.rename(columns={"Distrito": place_label})
 
     st.dataframe(show_df, use_container_width=True)
 
-    return edited[["Tipo", "Distrito", "Meta", "Contabilidad", "% Avance", "Pendiente", "SI", "NO"]]
+    return edited[["Tipo", "Distrito", "Meta", "Contabilidad", "% Avance", "Pendiente", "SI", "NO", "Distrito_key"]]
 
 
 # -----------------------------
@@ -726,7 +820,7 @@ df_cat_com = get_catalog_df(catalogo, delegacion_sel, "Comunidad")
 if h_com and d_com and col_com is not None:
     base_com = build_base_comunidad(h_com, d_com, col_com)
 else:
-    base_com = pd.DataFrame(columns=["Tipo", "Distrito", "SI", "NO"])
+    base_com = pd.DataFrame(columns=["Tipo", "Distrito", "Distrito_key", "SI", "NO"])
 
 base_com = merge_base_with_catalog(base_com, df_cat_com, "Comunidad")
 df_comunidad = apply_meta_calc_auto(base_com)
@@ -814,6 +908,6 @@ if st.button("📄 Generar PDF"):
 
 st.caption(
     "Listo: Comunidad mantiene la columna 'Distrito'. "
-    "Comercio y Policial ahora muestran 'Delegación'. "
-    "En el PDF, las secciones pequeñas se mantienen ordenadas para evitar que el título quede separado de sus datos."
+    "Comercio y Policial muestran 'Delegación'. "
+    "Ahora la comparación de distritos es robusta para variantes como Pará, San José de la Montaña, La Ribera, Uruca y similares."
 )
