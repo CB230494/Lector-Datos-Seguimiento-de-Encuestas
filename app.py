@@ -13,7 +13,15 @@ import streamlit as st
 
 from reportlab.lib.pagesizes import letter
 from reportlab.lib import colors
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image as RLImage
+from reportlab.platypus import (
+    SimpleDocTemplate,
+    Paragraph,
+    Spacer,
+    Table,
+    TableStyle,
+    Image as RLImage,
+    KeepTogether
+)
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import inch
 
@@ -226,7 +234,6 @@ def choose_default_yesno_col(header: list[str], data: list[list[str]]) -> int:
 # ✅ Deduplicación (≤ X minutos)
 # =========================================================
 def detect_datetime_col(header: list[str], data: list[list[str]]) -> int | None:
-    """Devuelve el índice de la columna con más valores parseables como datetime."""
     if not header or not data:
         return None
 
@@ -248,11 +255,6 @@ def detect_datetime_col(header: list[str], data: list[list[str]]) -> int | None:
 
 
 def dedupe_within_minutes(header: list[str], data: list[list[str]], minutes: int = 5) -> tuple[list[list[str]], int]:
-    """
-    Elimina respuestas duplicadas (mismas respuestas) dentro de un lapso de X minutos.
-    - Usa una columna de fecha/hora detectada automáticamente.
-    - Firma = todas las columnas normalizadas EXCEPTO la de fecha/hora.
-    """
     dt_col = detect_datetime_col(header, data)
     if dt_col is None:
         return data, 0
@@ -291,8 +293,6 @@ def dedupe_within_minutes(header: list[str], data: list[list[str]], minutes: int
 
 # =========================================================
 # ✅ Catálogo de metas (Excel)
-# - Debe existir: catalogo_metas.xlsx (misma carpeta)
-# - Columnas: Delegacion | Tipo | Distrito | Meta
 # =========================================================
 @st.cache_data
 def load_catalog(path: str = "catalogo_metas.xlsx") -> pd.DataFrame:
@@ -300,13 +300,12 @@ def load_catalog(path: str = "catalogo_metas.xlsx") -> pd.DataFrame:
         return pd.DataFrame(columns=["Delegacion", "Tipo", "Distrito", "Meta"])
 
     df = pd.read_excel(path)
-    # Normalización mínima
+
     df["Delegacion"] = df["Delegacion"].astype(str).str.strip().apply(pretty_title)
     df["Tipo"] = df["Tipo"].astype(str).str.strip().apply(pretty_title)
     df["Distrito"] = df["Distrito"].astype(str).str.strip().apply(pretty_title)
     df["Meta"] = pd.to_numeric(df["Meta"], errors="coerce").fillna(0).astype(int)
 
-    # Quitar filas vacías
     df = df[df["Delegacion"].apply(norm) != ""]
     df = df[df["Tipo"].apply(norm) != ""]
     df = df[df["Distrito"].apply(norm) != ""]
@@ -329,12 +328,6 @@ def get_catalog_df(catalogo: pd.DataFrame, delegacion: str, tipo: str) -> pd.Dat
 
 
 def merge_base_with_catalog(df_base: pd.DataFrame, df_cat: pd.DataFrame, tipo: str) -> pd.DataFrame:
-    """
-    Devuelve TODOS los distritos del catálogo (aunque CSV no traiga datos),
-    rellenando SI/NO con 0 si no aparecen.
-    df_base esperado: Tipo, Distrito, SI, NO
-    df_cat  esperado: Tipo, Distrito, Meta
-    """
     if df_base is None or df_base.empty:
         df_base = pd.DataFrame(columns=["Distrito", "SI", "NO"])
     else:
@@ -359,7 +352,7 @@ def merge_base_with_catalog(df_base: pd.DataFrame, df_cat: pd.DataFrame, tipo: s
 
 
 # -----------------------------
-# Construir tablas base (SI/NO ya calculados)
+# Construir tablas base
 # -----------------------------
 def build_base_comunidad(header, data, col_yesno):
     dist_col = find_district_col(header, data)
@@ -410,11 +403,6 @@ def build_base_from_totals(tipo: str, distrito: str, si: int, no: int) -> pd.Dat
 
 
 def apply_meta_calc_auto(df_base: pd.DataFrame) -> pd.DataFrame:
-    """
-    - Meta viene del catálogo (automática)
-    - Contabilidad = SI (automática)
-    - % Avance y Pendiente se calculan
-    """
     df = df_base.copy()
     df["Meta"] = pd.to_numeric(df.get("Meta", 0), errors="coerce").fillna(0).astype(int)
     df["SI"] = pd.to_numeric(df.get("SI", 0), errors="coerce").fillna(0).astype(int)
@@ -435,19 +423,22 @@ def apply_meta_calc_auto(df_base: pd.DataFrame) -> pd.DataFrame:
     return df[["Tipo", "Distrito", "Meta", "Contabilidad", "% Avance", "Pendiente", "SI", "NO"]]
 
 
-def editable_report_table(df: pd.DataFrame, key: str) -> pd.DataFrame:
+# -----------------------------
+# Tabla editable
+# -----------------------------
+def editable_report_table(df: pd.DataFrame, key: str, place_label: str = "Distrito") -> pd.DataFrame:
     """
-    Permite editar directamente los recuadros visibles del reporte.
-    Recalcula automáticamente % Avance y Pendiente cuando se modifica
-    Meta o Contabilidad.
+    place_label:
+    - "Distrito" para Comunidad
+    - "Delegación" para Comercio y Policial
     """
     if df is None or df.empty:
         return df
 
     df = df.copy()
 
-    # Solo estas columnas se editan
     editor_df = df[["Tipo", "Distrito", "Meta", "Contabilidad"]].copy()
+    editor_df = editor_df.rename(columns={"Distrito": place_label})
 
     edited = st.data_editor(
         editor_df,
@@ -456,20 +447,20 @@ def editable_report_table(df: pd.DataFrame, key: str) -> pd.DataFrame:
         key=key,
         column_config={
             "Tipo": st.column_config.TextColumn("Tipo"),
-            "Distrito": st.column_config.TextColumn("Distrito"),
+            place_label: st.column_config.TextColumn(place_label),
             "Meta": st.column_config.NumberColumn("Meta", min_value=0, step=1),
             "Contabilidad": st.column_config.NumberColumn("Contabilidad", min_value=0, step=1),
         },
         disabled=[]
     )
 
-    # Normalizar
+    edited = edited.rename(columns={place_label: "Distrito"})
+
     edited["Tipo"] = edited["Tipo"].astype(str)
     edited["Distrito"] = edited["Distrito"].astype(str)
     edited["Meta"] = pd.to_numeric(edited["Meta"], errors="coerce").fillna(0).astype(int)
     edited["Contabilidad"] = pd.to_numeric(edited["Contabilidad"], errors="coerce").fillna(0).astype(int)
 
-    # Recalcular automáticamente
     edited["Pendiente"] = (edited["Meta"] - edited["Contabilidad"]).clip(lower=0).astype(int)
     edited["% Avance"] = edited.apply(
         lambda r: f"{round((r['Contabilidad'] / r['Meta']) * 100):.0f}%"
@@ -477,7 +468,6 @@ def editable_report_table(df: pd.DataFrame, key: str) -> pd.DataFrame:
         axis=1
     )
 
-    # Columnas internas
     edited["SI"] = edited["Contabilidad"].astype(int)
 
     if "NO" in df.columns:
@@ -485,20 +475,35 @@ def editable_report_table(df: pd.DataFrame, key: str) -> pd.DataFrame:
     else:
         edited["NO"] = 0
 
-    # Mostrar resultado recalculado abajo
-    st.dataframe(
-        edited[["Tipo", "Distrito", "Meta", "Contabilidad", "% Avance", "Pendiente"]],
-        use_container_width=True
-    )
+    show_df = edited[["Tipo", "Distrito", "Meta", "Contabilidad", "% Avance", "Pendiente"]].copy()
+    show_df = show_df.rename(columns={"Distrito": place_label})
+
+    st.dataframe(show_df, use_container_width=True)
 
     return edited[["Tipo", "Distrito", "Meta", "Contabilidad", "% Avance", "Pendiente", "SI", "NO"]]
+
+
 # -----------------------------
 # PDF
 # -----------------------------
-def build_pdf_bytes(delegacion_label: str, hora_reporte: str, fecha_str: str, logo_path: str | None,
-                    df_com: pd.DataFrame, df_con: pd.DataFrame, df_pol: pd.DataFrame) -> bytes:
+def build_pdf_bytes(
+    delegacion_label: str,
+    hora_reporte: str,
+    fecha_str: str,
+    logo_path: str | None,
+    df_com: pd.DataFrame,
+    df_con: pd.DataFrame,
+    df_pol: pd.DataFrame
+) -> bytes:
     buff = io.BytesIO()
-    doc = SimpleDocTemplate(buff, pagesize=letter, leftMargin=28, rightMargin=28, topMargin=28, bottomMargin=28)
+    doc = SimpleDocTemplate(
+        buff,
+        pagesize=letter,
+        leftMargin=28,
+        rightMargin=28,
+        topMargin=28,
+        bottomMargin=28
+    )
     styles = getSampleStyleSheet()
 
     cell = ParagraphStyle("cell", parent=styles["Normal"], fontName="Helvetica", fontSize=9, leading=11)
@@ -518,16 +523,8 @@ def build_pdf_bytes(delegacion_label: str, hora_reporte: str, fecha_str: str, lo
     story.append(Paragraph(f"<b>Fecha:</b> {fecha_str}", styles["Normal"]))
     story.append(Spacer(1, 10))
 
-    def section(title: str, df: pd.DataFrame):
-        story.append(Paragraph(f"<b>{title}</b>", styles["Heading2"]))
-        story.append(Spacer(1, 4))
-
-        if df is None or df.empty:
-            story.append(Paragraph("No hay registros.", styles["Normal"]))
-            story.append(Spacer(1, 12))
-            return
-
-        cols = ["Tipo", "Distrito", "Meta", "Contabilidad", "% Avance", "Pendiente"]
+    def make_table(df: pd.DataFrame, place_label: str):
+        cols = ["Tipo", place_label, "Meta", "Contabilidad", "% Avance", "Pendiente"]
         data = [[Paragraph(c, head) for c in cols]]
 
         for _, r in df.iterrows():
@@ -540,7 +537,11 @@ def build_pdf_bytes(delegacion_label: str, hora_reporte: str, fecha_str: str, lo
                 Paragraph(str(int(pd.to_numeric(r["Pendiente"], errors="coerce"))), cell),
             ])
 
-        tbl = Table(data, colWidths=[62, 210, 55, 78, 58, 62])
+        tbl = Table(
+            data,
+            colWidths=[62, 210, 55, 78, 58, 62],
+            repeatRows=1
+        )
         tbl.setStyle(TableStyle([
             ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#E6E6E6")),
             ("GRID", (0, 0), (-1, -1), 0.6, colors.black),
@@ -550,13 +551,39 @@ def build_pdf_bytes(delegacion_label: str, hora_reporte: str, fecha_str: str, lo
             ("TOPPADDING", (0, 0), (-1, -1), 4),
             ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
         ]))
+        return tbl
 
-        story.append(tbl)
-        story.append(Spacer(1, 12))
+    def section(title: str, df: pd.DataFrame, place_label: str = "Distrito", keep_block: bool = False):
+        if df is None or df.empty:
+            block = [
+                Paragraph(f"<b>{title}</b>", styles["Heading2"]),
+                Spacer(1, 4),
+                Paragraph("No hay registros.", styles["Normal"]),
+                Spacer(1, 12),
+            ]
+            if keep_block:
+                story.append(KeepTogether(block))
+            else:
+                story.extend(block)
+            return
 
-    section("Comunidad", df_com)
-    section("Comercio", df_con)
-    section("Policial", df_pol)
+        tbl = make_table(df, place_label)
+
+        block = [
+            Paragraph(f"<b>{title}</b>", styles["Heading2"]),
+            Spacer(1, 4),
+            tbl,
+            Spacer(1, 12),
+        ]
+
+        if keep_block:
+            story.append(KeepTogether(block))
+        else:
+            story.extend(block)
+
+    section("Comunidad", df_com, place_label="Distrito", keep_block=False)
+    section("Comercio", df_con, place_label="Delegación", keep_block=True)
+    section("Policial", df_pol, place_label="Delegación", keep_block=True)
 
     doc.build(story)
     buff.seek(0)
@@ -569,7 +596,6 @@ def build_pdf_bytes(delegacion_label: str, hora_reporte: str, fecha_str: str, lo
 st.title("📄 Reporte por Delegación (Comunidad / Comercio / Policial)")
 st.caption("Metas y distritos salen automáticos desde el catálogo. Contabilidad = SI (automático).")
 
-# ✅ Cargar catálogo
 CAT_PATH = "catalogo_metas.xlsx"
 catalogo = load_catalog(CAT_PATH)
 
@@ -612,7 +638,7 @@ fname_pol, h_pol, d_pol = pick("Policial")
 
 
 # =========================================================
-# ✅ Filtros opcionales (deduplicación por tipo)
+# Filtros opcionales
 # =========================================================
 st.divider()
 st.subheader("0) Filtros opcionales")
@@ -642,7 +668,7 @@ if any(v > 0 for v in removed_info.values()):
 
 
 # =========================================================
-# 1) Ubicar los SI/NO (antes de cálculos)
+# 1) Ubicar SI/NO
 # =========================================================
 st.divider()
 st.subheader("1) ✅ Ubicar los SI/NO (antes del reporte)")
@@ -686,28 +712,32 @@ col_pol = ui_pick_yesno("Policial", h_pol, d_pol) if h_pol else None
 
 
 # =========================================================
-# 2) Reporte automático (Metas + Distritos desde catálogo)
+# 2) Reporte automático
 # =========================================================
 st.divider()
 st.subheader("2) Reporte (automático)")
 
 # -----------------------------
-# Comunidad (por distrito real)
+# Comunidad
 # -----------------------------
 st.markdown("### Comunidad")
 df_cat_com = get_catalog_df(catalogo, delegacion_sel, "Comunidad")
 
 if h_com and d_com and col_com is not None:
-    base_com = build_base_comunidad(h_com, d_com, col_com)  # Tipo, Distrito, SI, NO
+    base_com = build_base_comunidad(h_com, d_com, col_com)
 else:
     base_com = pd.DataFrame(columns=["Tipo", "Distrito", "SI", "NO"])
 
 base_com = merge_base_with_catalog(base_com, df_cat_com, "Comunidad")
 df_comunidad = apply_meta_calc_auto(base_com)
-df_comunidad = editable_report_table(df_comunidad, key=f"editor_comunidad_{delegacion_sel}")
+df_comunidad = editable_report_table(
+    df_comunidad,
+    key=f"editor_comunidad_{delegacion_sel}",
+    place_label="Distrito"
+)
 
 # -----------------------------
-# Comercio (1 fila desde catálogo)
+# Comercio
 # -----------------------------
 st.markdown("### Comercio")
 df_cat_con = get_catalog_df(catalogo, delegacion_sel, "Comercio")
@@ -726,10 +756,14 @@ else:
 base_con = build_base_from_totals("Comercio", distrito_con, si_con, no_con)
 base_con = merge_base_with_catalog(base_con, df_cat_con, "Comercio")
 df_comercio = apply_meta_calc_auto(base_con)
-df_comercio = editable_report_table(df_comercio, key=f"editor_comercio_{delegacion_sel}")
+df_comercio = editable_report_table(
+    df_comercio,
+    key=f"editor_comercio_{delegacion_sel}",
+    place_label="Delegación"
+)
 
 # -----------------------------
-# Policial (1 fila desde catálogo)
+# Policial
 # -----------------------------
 st.markdown("### Policial")
 df_cat_pol = get_catalog_df(catalogo, delegacion_sel, "Policial")
@@ -748,7 +782,11 @@ else:
 base_pol = build_base_from_totals("Policial", distrito_pol, si_pol, no_pol)
 base_pol = merge_base_with_catalog(base_pol, df_cat_pol, "Policial")
 df_policial = apply_meta_calc_auto(base_pol)
-df_policial = editable_report_table(df_policial, key=f"editor_policial_{delegacion_sel}")
+df_policial = editable_report_table(
+    df_policial,
+    key=f"editor_policial_{delegacion_sel}",
+    place_label="Delegación"
+)
 
 
 # =========================================================
@@ -774,5 +812,8 @@ if st.button("📄 Generar PDF"):
         mime="application/pdf"
     )
 
-st.caption("Listo: distritos + metas vienen del catálogo. Si editás Meta o Contabilidad, ahora % Avance y Pendiente se recalculan automáticamente.")
-
+st.caption(
+    "Listo: Comunidad mantiene la columna 'Distrito'. "
+    "Comercio y Policial ahora muestran 'Delegación'. "
+    "En el PDF, las secciones pequeñas se mantienen ordenadas para evitar que el título quede separado de sus datos."
+)
