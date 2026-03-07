@@ -39,7 +39,6 @@ def strip_accents(s: str) -> str:
 def normalize_visible_text(v) -> str:
     """
     Normaliza texto visible sin perder ñ, tildes ni caracteres especiales.
-    Unifica variantes Unicode (ej. ñ precompuesta vs n + tilde combinada).
     """
     if v is None:
         return ""
@@ -83,32 +82,15 @@ def pretty_title(s: str) -> str:
 def normalize_place_key(v) -> str:
     """
     Clave robusta para comparar distritos/delegaciones sin romper el texto visible.
-    Soporta:
-    - tildes
-    - ñ
-    - dobles espacios
-    - saltos de línea
-    - texto extra después de coma / guion / slash
-    - variantes conocidas (ej. Uruca / La Uruca)
     """
     if v is None:
         return ""
 
     s = normalize_visible_text(v)
-
-    # Normal base para comparación, sin romper el visible original
     s = strip_accents(s).casefold().strip()
-
-    # Quitar textos complementarios comunes:
-    # "Pará, Santo Domingo" -> "para"
-    # "San José de la Montaña - Barva" -> "san jose de la montana"
-    # "La Ribera / Belén" -> "la ribera"
     s = re.split(r"\s*[,;/\-]\s*", s)[0].strip()
-
-    # Limpiar artículos/ruido inicial o final
     s = re.sub(r"\s+", " ", s).strip(" .,:;-/")
 
-    # Homologaciones conocidas para no romper casos ya corregidos
     alias_map = {
         "la uruca": "uruca",
         "uruca": "uruca",
@@ -191,7 +173,7 @@ def parse_csv_robusto(file_bytes: bytes):
 
 
 # -----------------------------
-# Detectar columna Distrito (sin confundir preguntas)
+# Detectar columna Distrito
 # -----------------------------
 def clean_header_token(h: str) -> str:
     x = norm(h)
@@ -240,7 +222,7 @@ def get_unique_values(data, col_idx: int) -> list[str]:
 
 
 # -----------------------------
-# Ubicar SI/NO: ranking de columnas
+# Ubicar SI/NO
 # -----------------------------
 def rank_yesno_columns(header: list[str], data: list[list[str]], top_k: int = 8) -> pd.DataFrame:
     rows = []
@@ -297,7 +279,7 @@ def choose_default_yesno_col(header: list[str], data: list[list[str]]) -> int:
 
 
 # =========================================================
-# ✅ Deduplicación (≤ X minutos)
+# Deduplicación
 # =========================================================
 def detect_datetime_col(header: list[str], data: list[list[str]]) -> int | None:
     if not header or not data:
@@ -309,7 +291,7 @@ def detect_datetime_col(header: list[str], data: list[list[str]]) -> int | None:
     sample = data[:300]
     for j in range(len(header)):
         vals = [row[j] for row in sample if j < len(row)]
-        dt = pd.to_datetime(pd.Series(vals), errors="coerce", infer_datetime_format=True)
+        dt = pd.to_datetime(pd.Series(vals), errors="coerce")
         hits = int(dt.notna().sum())
         if hits > best_hits:
             best_hits = hits
@@ -328,7 +310,7 @@ def dedupe_within_minutes(header: list[str], data: list[list[str]], minutes: int
     rows = []
     for idx, r in enumerate(data):
         raw_dt = r[dt_col] if dt_col < len(r) else ""
-        dt = pd.to_datetime(raw_dt, errors="coerce", infer_datetime_format=True)
+        dt = pd.to_datetime(raw_dt, errors="coerce")
         rows.append((idx, dt.to_pydatetime() if pd.notna(dt) else None, r))
 
     valid = [x for x in rows if x[1] is not None]
@@ -358,12 +340,15 @@ def dedupe_within_minutes(header: list[str], data: list[list[str]], minutes: int
 
 
 # =========================================================
-# ✅ Catálogo de metas (Excel)
+# Catálogo de metas
 # =========================================================
 @st.cache_data
 def load_catalog(path: str = "catalogo_metas.xlsx") -> pd.DataFrame:
     if not Path(path).exists():
-        return pd.DataFrame(columns=["Delegacion", "Tipo", "Distrito", "Meta", "Distrito_key"])
+        return pd.DataFrame(columns=[
+            "Delegacion", "Tipo", "Distrito", "Meta",
+            "Delegacion_key", "Distrito_key"
+        ])
 
     df = pd.read_excel(path)
 
@@ -376,6 +361,7 @@ def load_catalog(path: str = "catalogo_metas.xlsx") -> pd.DataFrame:
     df = df[df["Tipo"].apply(norm) != ""]
     df = df[df["Distrito"].apply(norm) != ""]
 
+    df["Delegacion_key"] = df["Delegacion"].apply(normalize_place_key)
     df["Distrito_key"] = df["Distrito"].apply(normalize_place_key)
 
     return df.reset_index(drop=True)
@@ -385,14 +371,35 @@ def get_catalog_df(catalogo: pd.DataFrame, delegacion: str, tipo: str) -> pd.Dat
     if catalogo is None or catalogo.empty:
         return pd.DataFrame(columns=["Tipo", "Distrito", "Meta", "Distrito_key"])
 
-    d = pretty_title(delegacion)
+    d_key = normalize_place_key(delegacion)
     t = pretty_title(tipo)
 
-    out = catalogo[(catalogo["Delegacion"] == d) & (catalogo["Tipo"] == t)].copy()
+    out = catalogo[
+        (catalogo["Delegacion_key"] == d_key) &
+        (catalogo["Tipo"] == t)
+    ].copy()
+
     if out.empty:
         return pd.DataFrame(columns=["Tipo", "Distrito", "Meta", "Distrito_key"])
 
     return out[["Tipo", "Distrito", "Meta", "Distrito_key"]].sort_values("Distrito").reset_index(drop=True)
+
+
+def get_catalog_delegacion_display(catalogo: pd.DataFrame, delegacion: str) -> str:
+    """
+    Devuelve el nombre oficial del catálogo para mostrarlo bonito.
+    Ej: si viene 'Canas' desde el archivo, devuelve 'Cañas'.
+    """
+    if catalogo is None or catalogo.empty:
+        return pretty_title(delegacion)
+
+    d_key = normalize_place_key(delegacion)
+    m = catalogo[catalogo["Delegacion_key"] == d_key]
+
+    if not m.empty:
+        return str(m.iloc[0]["Delegacion"])
+
+    return pretty_title(delegacion)
 
 
 def merge_base_with_catalog(df_base: pd.DataFrame, df_cat: pd.DataFrame, tipo: str) -> pd.DataFrame:
@@ -532,11 +539,6 @@ def apply_meta_calc_auto(df_base: pd.DataFrame) -> pd.DataFrame:
 # Tabla editable
 # -----------------------------
 def editable_report_table(df: pd.DataFrame, key: str, place_label: str = "Distrito") -> pd.DataFrame:
-    """
-    place_label:
-    - "Distrito" para Comunidad
-    - "Delegación" para Comercio y Policial
-    """
     if df is None or df.empty:
         return df
 
@@ -731,17 +733,29 @@ for f in files:
     parsed.append((f.name, tipo, lugar, header, data))
     lugares.add(lugar)
 
-lugares = sorted(list(lugares), key=lambda x: strip_accents(x.lower()))
-delegacion_sel = st.selectbox("Delegación (Lugar):", lugares)
+# Mapa para mostrar nombre oficial del catálogo
+lugares_display_map = {}
+for l in lugares:
+    lugares_display_map[l] = get_catalog_delegacion_display(catalogo, l)
+
+lugares_ordenados = sorted(lugares, key=lambda x: strip_accents(lugares_display_map[x].lower()))
+
+delegacion_sel_raw = st.selectbox(
+    "Delegación (Lugar):",
+    lugares_ordenados,
+    format_func=lambda x: lugares_display_map.get(x, x)
+)
+
+delegacion_sel = get_catalog_delegacion_display(catalogo, delegacion_sel_raw)
 
 hora_reporte = st.text_input("Hora del reporte:", value="")
 fecha_str = fecha_es(datetime.now())
-delegacion_label = f"Delegación: {pretty_title(delegacion_sel)}"
+delegacion_label = f"Delegación: {delegacion_sel}"
 
 
 def pick(tipo_needed: str):
     for (fname, tipo, lugar, header, data) in parsed:
-        if lugar == delegacion_sel and tipo.lower() == tipo_needed.lower():
+        if normalize_place_key(lugar) == normalize_place_key(delegacion_sel_raw) and tipo.lower() == tipo_needed.lower():
             return fname, header, data
     return None, None, None
 
@@ -927,8 +941,7 @@ if st.button("📄 Generar PDF"):
     )
 
 st.caption(
-    "Listo: Comunidad mantiene la columna 'Distrito'. "
-    "Comercio y Policial muestran 'Delegación'. "
-    "La comparación de distritos/delegaciones conserva caracteres especiales en pantalla "
-    "y sigue siendo robusta para variantes como Cañas, Pará, San José de la Montaña, La Ribera, Uruca y similares."
+    "Listo: ahora la app compara por clave robusta y muestra el nombre oficial del catálogo. "
+    "Ejemplos: Cañas, Pará, San José de la Montaña, La Ribera, Uruca y Zapote."
 )
+
