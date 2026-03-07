@@ -36,11 +36,24 @@ def strip_accents(s: str) -> str:
     return "".join(ch for ch in s if unicodedata.category(ch) != "Mn")
 
 
-def norm(v) -> str:
+def normalize_visible_text(v) -> str:
+    """
+    Normaliza texto visible sin perder ñ, tildes ni caracteres especiales.
+    Unifica variantes Unicode (ej. ñ precompuesta vs n + tilde combinada).
+    """
     if v is None:
         return ""
     s = str(v).strip().strip("\ufeff")
     s = s.replace("\n", " ").replace("\r", " ")
+    s = unicodedata.normalize("NFC", s)
+    s = re.sub(r"\s+", " ", s).strip()
+    return s
+
+
+def norm(v) -> str:
+    if v is None:
+        return ""
+    s = normalize_visible_text(v)
     s = strip_accents(s).lower().strip()
     s = re.sub(r"\s+", " ", s).strip()
     s = s.replace("sí", "si").replace("si.", "si").replace("no.", "no")
@@ -58,9 +71,10 @@ def is_no(v) -> bool:
 def pretty_title(s: str) -> str:
     if s is None:
         return ""
-    t = str(s).strip().replace("_", " ").replace("-", " ")
+    t = normalize_visible_text(s)
+    t = t.replace("_", " ").replace("-", " ")
     t = re.sub(r"\s+", " ", t).strip()
-    return t.lower().title()
+    return t.title()
 
 
 # -----------------------------
@@ -71,6 +85,7 @@ def normalize_place_key(v) -> str:
     Clave robusta para comparar distritos/delegaciones sin romper el texto visible.
     Soporta:
     - tildes
+    - ñ
     - dobles espacios
     - saltos de línea
     - texto extra después de coma / guion / slash
@@ -79,12 +94,10 @@ def normalize_place_key(v) -> str:
     if v is None:
         return ""
 
-    s = str(v).strip().strip("\ufeff")
-    s = s.replace("\n", " ").replace("\r", " ").strip()
-    s = re.sub(r"\s+", " ", s)
+    s = normalize_visible_text(v)
 
-    # Normal base
-    s = strip_accents(s).lower().strip()
+    # Normal base para comparación, sin romper el visible original
+    s = strip_accents(s).casefold().strip()
 
     # Quitar textos complementarios comunes:
     # "Pará, Santo Domingo" -> "para"
@@ -104,6 +117,7 @@ def normalize_place_key(v) -> str:
         "para": "para",
         "la ribera": "la ribera",
         "ribera": "la ribera",
+        "canas": "canas",
     }
 
     return alias_map.get(s, s)
@@ -127,14 +141,20 @@ def fecha_es(dt: datetime) -> str:
 # Inferir tipo/lugar por filename
 # -----------------------------
 def infer_tipo_lugar(filename: str):
-    base = Path(filename).stem
+    base = normalize_visible_text(Path(filename).stem)
     m = re.match(r"(?i)^(policial|comunidad|comercio)_(.+?)_(\d{4}).*", base)
     if m:
-        return m.group(1).capitalize(), m.group(2).replace("_", " ").strip()
+        tipo = m.group(1).capitalize()
+        lugar = normalize_visible_text(m.group(2).replace("_", " ").strip())
+        return tipo, lugar
+
     parts = base.split("_")
     if len(parts) >= 2:
-        return parts[0].capitalize(), parts[1].replace("_", " ").strip()
-    return "Desconocida", base
+        tipo = normalize_visible_text(parts[0]).capitalize()
+        lugar = normalize_visible_text(parts[1].replace("_", " ").strip())
+        return tipo, lugar
+
+    return "Desconocida", normalize_visible_text(base)
 
 
 # -----------------------------
@@ -194,7 +214,7 @@ def find_district_col(header: list[str], data: list[list[str]]):
         vals = [data[r][col] for r in range(min(len(data), 200))]
         good = 0
         for v in vals:
-            vv = str(v).strip()
+            vv = normalize_visible_text(v)
             if norm(vv) == "":
                 continue
             if "?" in vv or ":" in vv:
@@ -215,7 +235,7 @@ def get_unique_values(data, col_idx: int) -> list[str]:
     for r in data:
         v = r[col_idx]
         if norm(v) != "":
-            vals.add(str(v).strip())
+            vals.add(normalize_visible_text(v))
     return sorted(list(vals), key=lambda x: strip_accents(x.lower()))
 
 
@@ -347,9 +367,9 @@ def load_catalog(path: str = "catalogo_metas.xlsx") -> pd.DataFrame:
 
     df = pd.read_excel(path)
 
-    df["Delegacion"] = df["Delegacion"].astype(str).str.strip().apply(pretty_title)
-    df["Tipo"] = df["Tipo"].astype(str).str.strip().apply(pretty_title)
-    df["Distrito"] = df["Distrito"].astype(str).str.strip().apply(pretty_title)
+    df["Delegacion"] = df["Delegacion"].astype(str).apply(normalize_visible_text).apply(pretty_title)
+    df["Tipo"] = df["Tipo"].astype(str).apply(normalize_visible_text).apply(pretty_title)
+    df["Distrito"] = df["Distrito"].astype(str).apply(normalize_visible_text).apply(pretty_title)
     df["Meta"] = pd.to_numeric(df["Meta"], errors="coerce").fillna(0).astype(int)
 
     df = df[df["Delegacion"].apply(norm) != ""]
@@ -546,7 +566,7 @@ def editable_report_table(df: pd.DataFrame, key: str, place_label: str = "Distri
     edited = edited.rename(columns={place_label: "Distrito"})
 
     edited["Tipo"] = edited["Tipo"].astype(str)
-    edited["Distrito"] = edited["Distrito"].astype(str)
+    edited["Distrito"] = edited["Distrito"].astype(str).apply(normalize_visible_text)
     edited["Meta"] = pd.to_numeric(edited["Meta"], errors="coerce").fillna(0).astype(int)
     edited["Contabilidad"] = pd.to_numeric(edited["Contabilidad"], errors="coerce").fillna(0).astype(int)
 
@@ -909,5 +929,6 @@ if st.button("📄 Generar PDF"):
 st.caption(
     "Listo: Comunidad mantiene la columna 'Distrito'. "
     "Comercio y Policial muestran 'Delegación'. "
-    "Ahora la comparación de distritos es robusta para variantes como Pará, San José de la Montaña, La Ribera, Uruca y similares."
+    "La comparación de distritos/delegaciones conserva caracteres especiales en pantalla "
+    "y sigue siendo robusta para variantes como Cañas, Pará, San José de la Montaña, La Ribera, Uruca y similares."
 )
