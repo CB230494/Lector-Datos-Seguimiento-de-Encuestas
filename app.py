@@ -104,6 +104,8 @@ def normalize_place_key(v) -> str:
         "anselmo llorente": "anselmo llorente",
         "pacuare": "pacuare",
         "pacuarito": "pacuare",
+        "Vara Blanca": " Vara Blanca",
+        "varablanca": "Vara Blanca",
     }
 
     return alias_map.get(s, s)
