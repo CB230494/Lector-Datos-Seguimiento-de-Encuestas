@@ -516,13 +516,16 @@ def build_base_from_totals(tipo: str, distrito: str, si: int, no: int) -> pd.Dat
     }])
 
 
-def apply_meta_calc_auto(df_base: pd.DataFrame) -> pd.DataFrame:
+def apply_meta_calc_auto(df_base: pd.DataFrame, count_no_for_total: bool = False) -> pd.DataFrame:
     df = df_base.copy()
     df["Meta"] = pd.to_numeric(df.get("Meta", 0), errors="coerce").fillna(0).astype(int)
     df["SI"] = pd.to_numeric(df.get("SI", 0), errors="coerce").fillna(0).astype(int)
     df["NO"] = pd.to_numeric(df.get("NO", 0), errors="coerce").fillna(0).astype(int)
 
-    df["Contabilidad"] = df["SI"].astype(int)
+    if count_no_for_total:
+        df["Contabilidad"] = (df["SI"] + df["NO"]).astype(int)
+    else:
+        df["Contabilidad"] = df["SI"].astype(int)
 
     df["% Avance"] = df.apply(
         lambda r: (r["Contabilidad"] / r["Meta"]) if r["Meta"] > 0 else 0.0,
@@ -915,7 +918,7 @@ else:
 
 base_pol = build_base_from_totals("Policial", distrito_pol, si_pol, no_pol)
 base_pol = merge_base_with_catalog(base_pol, df_cat_pol, "Policial")
-df_policial = apply_meta_calc_auto(base_pol)
+df_policial = apply_meta_calc_auto(base_pol, count_no_for_total=True)
 df_policial = editable_report_table(
     df_policial,
     key=f"editor_policial_{delegacion_sel}",
