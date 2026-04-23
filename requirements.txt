@@ -1,7 +1,9 @@
-pandas
-reportlab
-openyxl
 streamlit
+pandas
+openpyxl
+reportlab
+
+
 
 
 
